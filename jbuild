@@ -1,0 +1,6 @@
+(jbuild_version 1)
+
+(executable (
+    (name cmm_of_wasm)
+    (libraries (compiler-libs.optcomp libwasm bigarray))
+ ))
