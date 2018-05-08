@@ -26,4 +26,7 @@ let () =
      * we get the basics written *)
     log "Hello, and welcome to cmm_of_wasm!";
     let wasm_module = load_binary filename in
-    Libwasm.Print.module_ stdout !Flags.width wasm_module
+    Libwasm.Print.module_ stdout !Flags.width wasm_module;
+    log "Eliminating stack...";
+    let _ = Eliminate_stack.compile_module wasm_module in
+    log "Done!"
