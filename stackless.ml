@@ -1,6 +1,7 @@
 open Libwasm
 
 type virtual_var = string
+type var = int32
 type literal = Values.value
 
 type stackless_instr =
@@ -20,16 +21,15 @@ type stackless_instr =
   | Return                            (* break from function body *)
   | Call of var                       (* call function *)
   | CallIndirect of var               (* call function through table *)
-  | GetLocal of var                   (* read local variable *)
-  | SetLocal of var                   (* write local variable *)
-  | TeeLocal of var                   (* write local variable and keep value *)
   | GetGlobal of var                  (* read global variable *)
   | SetGlobal of var                  (* write global variable *)
   | Load of loadop                    (* read memory at address *)
   | Store of storeop                  (* write memory at address *)
-  | MemorySize                        (* size of linear memory *)
   | MemoryGrow                        (* grow linear memory *)
   *)
+  | MemorySize                        (* size of linear memory *)
+  | GetLocal of var               (* read local variable *)
+  | SetLocal of (var * virtual_var)   (* write local variable *)
   | Const of literal                  (* constant *)
   | Test of (Ast.testop * virtual_var * virtual_var)
                                       (* numeric test *)
@@ -46,6 +46,8 @@ module ToSexpr = struct
 
     let list f xs = List.map f xs
     let constop v = Types.string_of_value_type (Values.type_of v) ^ ".const"
+
+    let var = Libwasm.I32.to_string_u
 
     let rec instr e =
       let head, inner =
@@ -69,9 +71,6 @@ module ToSexpr = struct
         | Return -> "return", []
         | Call x -> "call " ^ var x, []
         | CallIndirect x -> "call_indirect", [Node ("type " ^ var x, [])]
-        | GetLocal x -> "get_local " ^ var x, []
-        | SetLocal x -> "set_local " ^ var x, []
-        | TeeLocal x -> "tee_local " ^ var x, []
         | GetGlobal x -> "get_global " ^ var x, []
         | SetGlobal x -> "set_global " ^ var x, []
         | Load op -> loadop op, []
@@ -79,6 +78,8 @@ module ToSexpr = struct
         | MemorySize -> "memory.size", []
         | MemoryGrow -> "memory.grow", []
         *)
+        | GetLocal x -> "get_local " ^ var x, []
+        | SetLocal (x, vvar) -> "set_local " ^ var x ^ ", " ^ vvar, []
         | Const lit -> constop lit ^ " " ^ Values.string_of_value lit, []
         | Test (op, v1, v2) -> Arrange.testop op, [vvar v1; vvar v2]
         | Compare (op, v1, v2) -> Arrange.relop op, [vvar v1; vvar v2]
@@ -87,4 +88,11 @@ module ToSexpr = struct
         | Convert (op, v1) -> Arrange.cvtop op, [vvar v1]
       in Node (head, inner)
 end
+
+module ShowStackless =
+    Ir.Show.Make(
+        struct
+            type t = stackless_instr
+            let sexpr_of_instr = ToSexpr.instr
+        end)
 

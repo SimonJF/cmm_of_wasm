@@ -47,7 +47,6 @@ let compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_instr 
         | Return                            (* break from function body *)
         | Call of var                       (* call function *)
         | CallIndirect of var               (* call function through table *)
-        | GetLocal of var                   (* read local variable *)
         | SetLocal of var                   (* write local variable *)
         | TeeLocal of var                   (* write local variable and keep value *)
         | GetGlobal of var                  (* read global variable *)
@@ -57,6 +56,18 @@ let compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_instr 
         | MemorySize                        (* size of linear memory *)
         | MemoryGrow                        (* grow linear memory *)
         *)
+        | GetLocal var ->
+            let open Stackless in
+            bind stack (Stackless.GetLocal var.it)
+        | SetLocal var ->
+            let new_val = Stack.pop stack in
+            let open Stackless in
+            [Stackless.SetLocal (var.it, new_val)]
+        | TeeLocal var ->
+            let new_val = Stack.top stack in
+            let open Stackless in
+            [Stackless.SetLocal (var.it, new_val)]
+        (* read local variable *)
         | Const lit -> 
             let open Stackless in
             bind stack (Stackless.Const lit.it)
