@@ -131,4 +131,3 @@ let compile_module (wasm_mod: Ast.module_) : Stackless.stackless_instr Ir.module
     imports = wasm_mod.imports;
     exports = wasm_mod.exports
   }
-

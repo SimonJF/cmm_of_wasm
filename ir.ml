@@ -41,3 +41,19 @@ type 'instr module_ =
   exports : Ast.export list;
 }
 
+
+module Show = struct
+
+    module type INSTRTYPE = sig
+        type t
+        val sexpr_of_instr : t -> Libwasm.Sexpr.sexpr
+    end
+
+    module Make (X: INSTRTYPE) = struct
+        type t = X.t
+
+        let sexpr_of_instr = X.sexpr_of_instr
+        let sexpr_of_module m = failwith "todo"
+        let string_of_module m = failwith "todo"
+    end
+end
