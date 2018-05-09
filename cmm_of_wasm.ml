@@ -28,5 +28,8 @@ let () =
     let wasm_module = load_binary filename in
     Libwasm.Print.module_ stdout !Flags.width wasm_module;
     log "Eliminating stack...";
-    let _ = Eliminate_stack.compile_module wasm_module in
+    let stackless = Eliminate_stack.compile_module wasm_module in
+    (*
+    Printf.printf "Stackless representation: \n%s\n" (Ir.show_module_ stackless); 
+    *)
     log "Done!"

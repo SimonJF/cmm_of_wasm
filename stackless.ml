@@ -37,4 +37,54 @@ type stackless_instr =
   | Unary of (Ast.unop * virtual_var)                    (* unary numeric operator *)
   | Binary of (Ast.binop * virtual_var * virtual_var)                  (* binary numeric operator *)
   | Convert of (Ast.cvtop * virtual_var)                 (* conversion *)
+  [@@deriving show]
+
+module ToSexpr = struct
+    open Sexpr
+
+    let vvar v = Atom ("vvar " ^ v)
+
+    let list f xs = List.map f xs
+    let constop v = Types.string_of_value_type (Values.type_of v) ^ ".const"
+
+    let rec instr e =
+      let head, inner =
+        match e with
+        | Unreachable -> "unreachable", []
+        | Let (bnd, e) -> "let " ^ bnd, [instr e]
+        | Return var -> "return " ^ var, []
+        (*
+        | Select -> "select", []
+        | Block (ts, es) -> "block", stack_type ts @ list instr es
+        | Loop (ts, es) -> "loop", stack_type ts @ list instr es
+        *)
+        | If (var, es1, es2) ->
+            "if", (vvar var) ::
+                [Node ("then", list instr es1); Node ("else", list instr es2)]
+            (*
+        | Br x -> "br " ^ var x, []
+        | BrIf x -> "br_if " ^ var x, []
+        | BrTable (xs, x) ->
+          "br_table " ^ String.concat " " (list var (xs @ [x])), []
+        | Return -> "return", []
+        | Call x -> "call " ^ var x, []
+        | CallIndirect x -> "call_indirect", [Node ("type " ^ var x, [])]
+        | GetLocal x -> "get_local " ^ var x, []
+        | SetLocal x -> "set_local " ^ var x, []
+        | TeeLocal x -> "tee_local " ^ var x, []
+        | GetGlobal x -> "get_global " ^ var x, []
+        | SetGlobal x -> "set_global " ^ var x, []
+        | Load op -> loadop op, []
+        | Store op -> storeop op, []
+        | MemorySize -> "memory.size", []
+        | MemoryGrow -> "memory.grow", []
+        *)
+        | Const lit -> constop lit ^ " " ^ Values.string_of_value lit, []
+        | Test (op, v1, v2) -> Arrange.testop op, [vvar v1; vvar v2]
+        | Compare (op, v1, v2) -> Arrange.relop op, [vvar v1; vvar v2]
+        | Unary (op, v1) -> Arrange.unop op, [vvar v1]
+        | Binary (op, v1, v2) -> Arrange.binop op, [vvar v1; vvar v2]
+        | Convert (op, v1) -> Arrange.cvtop op, [vvar v1]
+      in Node (head, inner)
+end
 

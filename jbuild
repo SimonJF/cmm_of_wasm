@@ -3,5 +3,5 @@
 (executable (
     (name cmm_of_wasm)
     (libraries (compiler-libs.optcomp libwasm bigarray))
-    ; (preprocess (pps (ppx_import ppx_deriving)))
+    ; (preprocess (pps (ppx_deriving.std)))
  ))
