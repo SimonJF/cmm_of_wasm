@@ -66,8 +66,22 @@ module Show = struct
           list sexpr_of_instr c
 
 
-        let global = failwith "TODO"
-        let func_with_index = failwith "TODO"
+        let global off i g =
+          let {gtype; value} = g in
+          Node ("global $" ^ Arrange.nat (off + i), 
+            Arrange.global_type gtype :: const value)
+
+        let func_with_name name f =
+          let {ftype; locals; body} = f in
+          Node ("func" ^ name,
+            [Node ("type " ^ var ftype, [])] @
+            Arrange.decls "local" locals @
+            list sexpr_of_instr body
+          )
+
+        let func_with_index off i f =
+          func_with_name (" $" ^ Arrange.nat (off + i)) f
+
 
         let segment head dat seg =
           let {index; offset; init} = seg in
