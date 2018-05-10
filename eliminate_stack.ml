@@ -26,7 +26,7 @@ let popn stack n =
     end in
   go n
 
-let compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_instr list =
+let rec compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_instr list =
     let stack = Stack.create () in
 
     let compile_instr stack instr = 
@@ -36,21 +36,59 @@ let compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_instr 
         | Nop -> [] (* eliminate nops *)
         | Drop ->
             let _ = Stack.pop stack in [] (* forget a value *)
+        | Select ->
+            let [cond; v2; v1] = popn stack 3 in
+            let open Stackless in
+            [Select {
+              v1 = v1;
+              v2 = v2;
+              conditional = cond
+            }]
         (* 
-        | Select -> failwith "select unimplemented" (* branchless conditional *)
         | Block of stack_type * instr list  (* execute in sequence *)
         | Loop of stack_type * instr list   (* loop header *)
-        | If of stack_type * instr list * instr list  (* conditional *)
-        | Br of var                         (* break to n-th surrounding label *)
-        | BrIf of var                       (* conditional break *)
-        | BrTable of var list * var         (* indexed break *)
-        | Return                            (* break from function body *)
-        | Call of var                       (* call function *)
-        | CallIndirect of var               (* call function through table *)
-        | SetLocal of var                   (* write local variable *)
-        | TeeLocal of var                   (* write local variable and keep value *)
-        | GetGlobal of var                  (* read global variable *)
-        | SetGlobal of var                  (* write global variable *)
+        *)
+        | If (stack_ty, then_branch, else_branch) ->
+            (* Currently, stack_ty is defined as a list of *output*
+             * types, which may either be of length 0 or 1. *)
+            let cond_var = Stack.pop stack in
+            let compiled_then = compile_instrs then_branch in
+            let compiled_else = compile_instrs else_branch in
+            let compiled_if = Stackless.If (cond_var, compiled_then, compiled_else) in
+            if (List.length stack_ty = 0) then
+              [compiled_if]
+            else
+              bind stack compiled_if
+        | Return ->
+            (* TODO: To handle functions, we will need to devise a way of
+             * returning multiple arguments. I think it would make sense,
+             * therefore, to generalise Stackless.Return to take a list?
+             * In any case, getting the compilation pipeline working is my
+             * first goal. *)
+            failwith "functions not yet implemented"
+        | Br var -> [Stackless.Br var.it]
+        | BrIf var ->
+            let cond = Stack.pop stack in
+            [Stackless.BrIf (var.it, cond)]
+        | BrTable (vs, v) ->
+            let operand = Stack.pop stack in
+            let open Stackless in
+            let br_ty = {
+              labels = (List.map (fun (v: Ast.var) -> v.it) vs);
+              default = v.it;
+              operand = operand
+            } in
+            [Stackless.BrTable br_ty]
+        | Call v -> [Stackless.Call v.it]
+        | CallIndirect v ->
+            let operand = Stack.pop stack in
+            [Stackless.CallIndirect (v.it, operand)]
+        | GetGlobal var ->
+            bind stack (Stackless.GetGlobal var.it)
+        | SetGlobal var ->
+            let new_val = Stack.pop stack in
+            [Stackless.SetGlobal (var.it, new_val)]
+        (*
         | Load of loadop                    (* read memory at address *)
         | Store of storeop                  (* write memory at address *)
         | MemorySize                        (* size of linear memory *)
@@ -97,8 +135,19 @@ let compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_instr 
     let rec go acc (instrs: Libwasm.Ast.instr list) =
       match instrs with
         | [] ->
-            let result = Stack.pop stack in
-            (Stackless.Return result) :: acc |> List.rev
+            (* The stack may well be empty if a block is
+             * merely side-effecting. In this case, we currently just
+             * don't generate a return. Maybe we want to require a return
+             * (and thus move to let-in instead of just let), and generalise
+             * return to take an optional argument.
+             *
+             * Additionally, in future, WASM may support returning multiple
+             * values from a block. We're currently assuming a single one. *)
+            if not (Stack.is_empty stack) then
+              let result = Stack.pop stack in
+              (Stackless.Return result) :: acc |> List.rev
+            else
+              List.rev acc
         | instr :: instrs ->
             let instr' = instr.it in
             let compiled_instrs = compile_instr stack instr' in
