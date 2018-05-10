@@ -70,35 +70,62 @@ module ToSexpr = struct
 
     let var = Libwasm.I32.to_string_u
 
+    let memop name {ty; align; offset; _} =
+      Arrange.value_type ty ^ "." ^ name ^
+      (if offset = 0l then "" else " offset=" ^ Arrange.nat32 offset) ^
+      (if 1 lsl align = Types.size ty then "" else " align=" ^ Arrange.nat (1 lsl align))
+
+    let loadop op =
+      match op.sz with
+      | None -> memop "load" op
+      | Some (sz, ext) ->
+          memop ("load" ^ 
+                 Arrange.pack_size sz ^
+                 Arrange.extension ext) op
+
+    let storeop op =
+      match op.sz with
+      | None -> memop "store" op
+      | Some sz -> memop ("store" ^ Arrange.pack_size sz) op
+
+
     let rec instr e =
       let head, inner =
         match e with
         | Unreachable -> "unreachable", []
         | Let (bnd, e) -> "let " ^ bnd, [instr e]
         | Return var -> "return " ^ var, []
-        (*
-        | Select -> "select", []
-        | Block (ts, es) -> "block", stack_type ts @ list instr es
-        | Loop (ts, es) -> "loop", stack_type ts @ list instr es
-        *)
+        | Select sty ->
+            "select", [vvar sty.v1; vvar sty.v2; vvar sty.conditional]
+        | Block es -> "block", list instr es
+        | Loop es -> "loop", list instr es
         | If (var, es1, es2) ->
             "if", (vvar var) ::
                 [Node ("then", list instr es1); Node ("else", list instr es2)]
-            (*
         | Br x -> "br " ^ var x, []
-        | BrIf x -> "br_if " ^ var x, []
-        | BrTable (xs, x) ->
-          "br_table " ^ String.concat " " (list var (xs @ [x])), []
-        | Return -> "return", []
+        | BrIf (x, v) -> "br_if " ^ var x ^ ", " ^ v, []
+        | BrTable brt ->
+            let formatted_labels =
+              String.concat " " (list var (brt.labels @ [brt.default])) in
+            let labels_node = Node ("labels", [Atom formatted_labels]) in
+            let operand_node = Node ("operand", [vvar brt.operand]) in
+          "br_table ", [labels_node; operand_node]
+        | Load op -> 
+            "loadop ",
+            [ (Node ("memop", [Atom (loadop op.memory_operation)]));
+              (Node ("address", [vvar op.address])) ]
+        | Store op ->
+            "storeop ",
+            [ (Node ("memop", [Atom (storeop op.pack_size)]));
+              (Node ("address", [vvar op.address])) ]
         | Call x -> "call " ^ var x, []
-        | CallIndirect x -> "call_indirect", [Node ("type " ^ var x, [])]
+        | CallIndirect (x, vvar) ->
+                "call_indirect",
+                [Node ("type " ^ var x, []); Node ("vvar " ^ vvar, [])]
         | GetGlobal x -> "get_global " ^ var x, []
-        | SetGlobal x -> "set_global " ^ var x, []
-        | Load op -> loadop op, []
-        | Store op -> storeop op, []
+        | SetGlobal (x, vvar) -> "set_global " ^ var x ^ ", " ^ vvar, []
         | MemorySize -> "memory.size", []
-        | MemoryGrow -> "memory.grow", []
-        *)
+        | MemoryGrow v -> "memory.grow " ^ v, []
         | GetLocal x -> "get_local " ^ var x, []
         | SetLocal (x, vvar) -> "set_local " ^ var x ^ ", " ^ vvar, []
         | Const lit -> constop lit ^ " " ^ Values.string_of_value lit, []
