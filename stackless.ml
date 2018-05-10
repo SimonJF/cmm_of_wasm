@@ -25,7 +25,8 @@ type loadop = {
 }
 type storeop = {
     pack_size : Memory.pack_size memop;
-    address : virtual_var
+    address : virtual_var;
+    to_store : virtual_var
 }
 
 type stackless_instr =
@@ -33,10 +34,8 @@ type stackless_instr =
   | Return of virtual_var
   | Unreachable
   | Select of select_type
-  (*
-  | Block of stack_type * stackless_instr list  (* execute in sequence *)
-  | Loop of stack_type * stackless_instr list   (* loop header *)
-  *)
+  | Block of stackless_instr list  (* execute in sequence *)
+  | Loop of stackless_instr list   (* loop header *)
   | If of virtual_var * stackless_instr list * stackless_instr list  (* conditional *)
   (* TODO: I'm still not entirely sure of the effects Br has on the stack, from the
    * operational semantics. I'll need to look at it a bit more, although the text

@@ -44,10 +44,20 @@ let rec compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_in
               v2 = v2;
               conditional = cond
             }]
-        (* 
-        | Block of stack_type * instr list  (* execute in sequence *)
-        | Loop of stack_type * instr list   (* loop header *)
-        *)
+        | Block (stack_ty, instrs) ->
+            let compiled_instrs = compile_instrs instrs in
+            let compiled_block = Stackless.Block compiled_instrs in
+            if (List.length stack_ty = 0) then
+              [compiled_block]
+            else
+              bind stack compiled_block
+        | Loop (stack_ty, instrs) ->
+            let compiled_instrs = compile_instrs instrs in
+            let compiled_loop = Stackless.Loop compiled_instrs in
+            if (List.length stack_ty = 0) then
+              [compiled_loop]
+            else
+              bind stack compiled_loop
         | If (stack_ty, then_branch, else_branch) ->
             (* Currently, stack_ty is defined as a list of *output*
              * types, which may either be of length 0 or 1. *)
@@ -88,12 +98,40 @@ let rec compile_instrs (instrs: Libwasm.Ast.instr list) : Stackless.stackless_in
         | SetGlobal var ->
             let new_val = Stack.pop stack in
             [Stackless.SetGlobal (var.it, new_val)]
-        (*
-        | Load of loadop                    (* read memory at address *)
-        | Store of storeop                  (* write memory at address *)
-        | MemorySize                        (* size of linear memory *)
-        | MemoryGrow                        (* grow linear memory *)
-        *)
+        | Load load_op ->
+            let addr = Stack.pop stack in
+            let open Stackless in
+            let memory_op = {
+              ty = load_op.ty;
+              align = load_op.align;
+              offset = load_op.offset;
+              sz = load_op.sz
+            } in
+
+            let load_op = {
+              memory_operation = memory_op;
+              address = addr
+            } in
+            bind stack (Stackless.Load load_op)
+        | Store store_op ->
+            let open Stackless in
+            let [to_store; addr] = popn stack 2 in
+            let memory_op = {
+              ty = store_op.ty;
+              align = store_op.align;
+              offset = store_op.offset;
+              sz = store_op.sz
+            } in
+            let store_op = {
+              pack_size = memory_op;
+              address = addr;
+              to_store = to_store
+            } in
+            [Stackless.Store store_op]
+        | MemorySize -> bind stack Stackless.MemorySize
+        | MemoryGrow ->
+            let grow_amount = Stack.pop stack in
+            bind stack (Stackless.MemoryGrow grow_amount)
         | GetLocal var ->
             let open Stackless in
             bind stack (Stackless.GetLocal var.it)
