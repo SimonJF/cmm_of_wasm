@@ -1,0 +1,5 @@
+B ../../../_build/default/src/lib/ir
+FLG -open Ir -w -40
+PKG bigarray
+PKG libwasm
+PKG unix
