@@ -1,7 +1,5 @@
 open Libwasm
 
-type branch = Label.t * Var.t list
-
 type is_rec = bool
 
 type term = {
@@ -16,12 +14,12 @@ and statement =
 
 and terminator =
   | Unreachable
-  | Br of branch
-  | BrTable of { cond : Var.t; branches : branch list; default : branch }
-  | If of { cond : Var.t; ifso : branch; ifnot : branch }
+  | Br of Branch.t
+  | BrTable of { index : Var.t; es : Branch.t list; default : Branch.t }
+  | If of { cond : Var.t; ifso : Branch.t; ifnot : Branch.t }
   | Call of { func : Func_id.t; args : Var.t list; arg_type : Types.stack_type;
-              ret_type : Types.stack_type; cont : branch }
-  | CallIndirect of { type_ : Types.func_type; func : Var.t; args : Var.t list; cont : branch }
+              ret_type : Types.stack_type; cont : Branch.t }
+  | CallIndirect of { type_ : Types.func_type; func : Var.t; args : Var.t list; cont : Branch.t }
 
 and expr =
   | Select of { cond : Var.t; ifso : Var.t; ifnot : Var.t }
