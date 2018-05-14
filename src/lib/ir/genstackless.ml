@@ -23,11 +23,43 @@ let push_all stack xs =
     | x :: xs -> Stack.push x stack; (go xs) in
   go xs
 
+let pop_all stack =
+  let rec go () =
+    if (Stack.is_empty stack) then [] else Stack.pop stack :: go () in
+  go ()
+
 let ir_term instrs env =
   let open Libwasm.Ast in
   let rec transform_instrs env generated (instrs: Ast.instr list) =
+  (* Stack manipulation *)
+  let pop () = Stack.pop (Translate_env.stack env) in
+
+  let pop2 () =
+    let v1 = Stack.pop (Translate_env.stack env) in
+    let v2 = Stack.pop (Translate_env.stack env) in
+    (v1, v2) in
+
+  let popn n =
+    let rec go n =
+      if n <= 0 then
+        []
+      else
+        let v = Stack.pop (Translate_env.stack env) in
+        v :: (go (n-1)) in
+    go n in
     match instrs with
-      | [] -> failwith "todo"
+      | [] ->
+          (* Have:
+            * - A list of generated instructions
+            * - Function return
+            * - Block return *)
+          (* Need: term *)
+          let cont_label = (Translate_env.continuation env) in
+          let arity = Label.arity cont_label in
+          let returned = popn arity |> List.rev in
+          let return_branch = Branch.create cont_label returned in
+          let terminator = Stackless.Br return_branch in
+          terminate generated terminator
       | x :: xs ->
           begin
           (* Binds a "pushed" variable, records on virtual stack *)
@@ -36,23 +68,6 @@ let ir_term instrs env =
             Stack.push v (Translate_env.stack env);
             transform_instrs env (Let (v, x) :: generated) xs in
           let nop = transform_instrs env generated xs in
-
-          (* Stack manipulation *)
-          let pop () = Stack.pop (Translate_env.stack env) in
-
-          let pop2 () =
-            let v1 = Stack.pop (Translate_env.stack env) in
-            let v2 = Stack.pop (Translate_env.stack env) in
-            (v1, v2) in
-
-          let popn n =
-            let rec go n =
-              if n <= 0 then
-                []
-              else
-                let v = Stack.pop (Translate_env.stack env) in
-                v :: (go (n-1)) in
-            go n in
 
           let label_and_args (n: int32 Source.phrase) =
             let lbl = Translate_env.nth_label (Int32.to_int n.it) env in
@@ -187,8 +202,15 @@ let ir_term instrs env =
             | TeeLocal var -> failwith "todo"
             | GetGlobal var -> failwith "todo"
             | SetGlobal var -> failwith "todo"
-            | Load loadop -> failwith "todo"
-            | Store storeop -> failwith "todo"
+            | Load loadop ->
+                let addr = pop () in
+                bind (Stackless.Load (loadop, addr)) loadop.ty
+            | Store storeop ->
+                let arg = pop () in
+                let addr = pop () in
+                let eff =
+                  Stackless.Store { op = storeop; index = addr; value = arg } in
+                transform_instrs env (Stackless.Effect eff :: generated) xs
             | MemorySize ->
                 bind (Stackless.MemorySize) Types.I32Type
             | MemoryGrow ->
