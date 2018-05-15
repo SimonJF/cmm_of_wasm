@@ -9,12 +9,6 @@ let terminate
   terminator = terminator
 }
 
-let push_all stack xs =
-  let rec go = function
-    | [] -> ()
-    | x :: xs -> Stack.push x stack; (go xs) in
-  go xs
-
 let ir_term instrs env =
   let open Libwasm.Ast in
   let rec transform_instrs env generated (instrs: Ast.instr list) =
@@ -76,7 +70,8 @@ let ir_term instrs env =
             | Nop -> nop env
             | Drop -> let (_, env) = Translate_env.pop env in nop env
             | Select ->
-                let ([cond; ifnot; ifso], env) = Translate_env.popn 3 env in
+                let [@warning "-8"] ([cond; ifnot; ifso], env) =
+                  Translate_env.popn 3 env in
                 bind 
                   env
                   (Stackless.Select { cond; ifso; ifnot }) 
