@@ -24,18 +24,6 @@ let ir_term instrs env =
       let (args, _) = Translate_env.popn arity env in
       (lbl, args) in
 
-    (* Ending a block / branch *)
-    let end_block lbl tys instrs =
-      (* Create argument variables for each argument type. *)
-      (* TODO: Incorporate local variables *)
-      let arg_params = List.map Var.create tys in
-      (* Push new variables to virtual stack *)
-      let stack = Translate_env.stack env in
-      let new_stack = arg_params @ stack in
-      let env = Translate_env.with_stack new_stack env in
-      (* Codegen continuation *)
-      let term = transform_instrs env [] instrs in
-      Cont (lbl, arg_params , false, term) in
     (* Main *)
     match instrs with
       | [] ->
@@ -47,7 +35,8 @@ let ir_term instrs env =
           let cont_label = (Translate_env.continuation env) in
           let arity = Label.arity cont_label in
           let (returned, _) = Translate_env.popn arity env in
-          let return_branch = Branch.create cont_label returned in
+          let locals = Translate_env.locals env in
+          let return_branch = Branch.create cont_label (returned @ locals) in
           let terminator = Stackless.Br return_branch in
           terminate generated terminator
       | x :: xs ->
@@ -59,14 +48,25 @@ let ir_term instrs env =
             transform_instrs env (Let (v, x) :: generated) xs in
 
           let bind_local (env: Translate_env.t) (var: Ast.var) (x: Var.t) =
-            let ty = (Translate_env.get_local var env) |> Var.type_ in
             let env = Translate_env.set_local var x env in
             transform_instrs env generated xs in
 
           (* Capturing a continuation *)
-          let capture_continuation tys =
-            let lbl = Label.create (List.length tys) in
-            lbl, end_block lbl tys xs in
+          let capture_continuation parameter_tys =
+            let lbl = Label.create (List.length parameter_tys) in
+            (* Create parameters for each argument type required by continuation. *)
+            let arg_params = List.map Var.create parameter_tys in
+            (* All continuations take the required parameters, followed
+             * by the local variables (as required by SSA) *)
+            let local_params = List.map Var.rename (Translate_env.locals env) in
+            (* Push parameters onto to virtual stack *)
+            let stack = Translate_env.stack env in
+            let new_stack = arg_params @ local_params @ stack in
+            let env = Translate_env.with_stack new_stack env in
+            (* Codegen continuation *)
+            let term = transform_instrs env [] instrs in
+            let cont = Cont (lbl, arg_params @ local_params, false, term) in
+            (lbl, cont) in
 
           let nop env = transform_instrs env generated xs in
 
@@ -84,6 +84,7 @@ let ir_term instrs env =
             | Block (tys, is) ->
                 (* Capture current continuation *)
                 let (cont_lbl, cont) = capture_continuation tys in
+
                 (* Codegen block, with return set to captured continuation *)
                 let env =
                   Translate_env.create
@@ -97,51 +98,55 @@ let ir_term instrs env =
                 let (cont_lbl, cont) = capture_continuation tys in
 
                 (* Loop continuation creation *)
-                (* TODO: Take local variables into account *)
                 let loop_lbl = Label.create 0 in
+                let locals = Translate_env.locals env in
+                let loop_params = List.map Var.rename locals in
                 let loop_env =
                   Translate_env.create
                     ~stack:[]
-                    ~continuation:loop_lbl
+                    ~continuation:cont_lbl
                     ~return:(Translate_env.return env)
-                    ~locals:(Translate_env.locals env) in
-                let loop_branch = Branch.create loop_lbl [] in
+                    ~locals:loop_params in
+                let loop_branch = Branch.create loop_lbl locals in
                 let loop_term = transform_instrs loop_env [] is in
-                let loop_cont = Cont (loop_lbl, [], true, loop_term) in
+                let loop_cont = Cont (loop_lbl, loop_params, true, loop_term) in
 
                 (* Block termination *)
                 terminate (loop_cont :: cont :: generated) (Br loop_branch)
-
             | If (tys, t, f) ->
                 (* Pop condition *)
                 let (cond, env) = Translate_env.pop env in
-                let fresh_env =
+                let fresh_env locals =
                   Translate_env.create
                     ~stack:[]
                     ~continuation:(Translate_env.continuation env)
                     ~return:(Translate_env.return env)
-                    ~locals:(Translate_env.locals env) in
+                    ~locals in
 
                 (* For each branch, make a continuation with a fresh label,
                  * containing the instructions in the branch. *)
-                (* TODO: Incorporate local variables *)
                 let make_branch instrs =
                   let lbl = Label.create 0 in
-                  let env = fresh_env in
+                  let locals = Translate_env.locals env in
+                  let local_params = List.map Var.rename locals in
+                  let env = fresh_env local_params in
                   let transformed = transform_instrs env [] instrs in
-                  (* Each branch (currently, in WASM 1.0) may not take any
-                   * arguments *)
-                  Branch.create lbl [], 
-                  Cont (lbl, [], false, transformed) in
+                  (* NOTE: We are currently creating parameters, and immediately
+                   * applying the current locals as parameters in the branches!
+                   * I'm confident we can optimise this, but being uniform and 
+                   * careful to start... *)
+                  Branch.create lbl locals, 
+                  Cont (lbl, local_params, false, transformed) in
 
                 (* Make true and false branches *)
                 let branch_t, cont_t = make_branch t in
                 let branch_f, cont_f = make_branch f in
                 let (cont_lbl, cont) = capture_continuation tys in
 
-                (* Branches don't take arguments; provide labels *)
+                (* If term: condition variable, and corresponding branch instructions *)
                 let if_term =
                   Stackless.If { cond; ifso = branch_t; ifnot = branch_f } in
+                (* Finally put the generated continuations on the stack and terminate *)
                 terminate (cont_t :: cont_f :: cont :: generated) if_term
             | Br nesting ->
                 let (lbl, args) = label_and_args env nesting in
@@ -171,14 +176,13 @@ let ir_term instrs env =
                   Stackless.BrTable { index; es = branches; default } in
                 terminate generated brtable_term
             | Return ->
-                (* TODO: Locals *)
                 let arity =
                   Translate_env.continuation env
                   |> Label.arity in
                 let (returned, env) = Translate_env.popn arity env in
-                let function_return =
-                  Translate_env.return env in
-                let branch = Branch.create function_return returned in
+                let function_return = Translate_env.return env in
+                let locals = Translate_env.locals env in
+                let branch = Branch.create function_return (returned @ locals) in
                 terminate generated (Stackless.Br branch)
             | Call var -> failwith "todo"
             | CallIndirect var -> failwith "todo"
