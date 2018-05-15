@@ -2,13 +2,15 @@ open Libwasm
 
 type is_rec = bool
 
+type binder = Var.t
+
 type term = {
   body : statement list;
   terminator : terminator
 }
 
 and statement =
-  | Cont of Label.t * Var.t list * is_rec * term
+  | Cont of Label.t * binder list * is_rec * term
   | Let of Var.t * expr
   | Effect of effect
 
@@ -41,6 +43,6 @@ and effect =
 type func = {
   return : Label.t;
   type_ : Types.func_type;
-  args : Var.t list;
+  args : binder list;
   body : term;
 }
