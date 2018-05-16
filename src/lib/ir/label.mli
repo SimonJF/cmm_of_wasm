@@ -12,5 +12,6 @@ end
 
 type t
 val create : arity:int -> t
+val create_return : arity:int -> t
 val id : t -> Id.t 
 val arity : t -> int

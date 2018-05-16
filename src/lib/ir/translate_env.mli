@@ -4,6 +4,7 @@ val create :
   stack:Var.t list ->
   continuation:Label.t ->
   return:Label.t ->
+  label_stack:Label.t list ->
   locals:Var.t list ->
   globals:Global.t Util.Maps.Int32Map.t ->
   functions:Func.t Util.Maps.Int32Map.t ->

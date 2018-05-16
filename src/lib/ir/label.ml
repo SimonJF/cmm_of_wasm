@@ -32,5 +32,11 @@ let create ~arity = {
   arity = arity
 }
 
+let create_return ~arity = {
+  id = Id.return;
+  arity = arity
+}
+
+
 let id lbl = lbl.id
 let arity lbl = lbl.arity

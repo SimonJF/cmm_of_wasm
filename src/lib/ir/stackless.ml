@@ -46,3 +46,15 @@ type func = {
   args : binder list;
   body : term;
 }
+
+type global = {
+  gtype : global_type;
+  value : Libwasm.Values.value
+}
+
+type module_ = {
+    funcs : func Func.Map.t;
+    start : Func.t option;
+    globals: global Global.Map.t
+    (* TODO: Fill the rest of this in *)
+}

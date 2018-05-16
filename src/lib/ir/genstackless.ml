@@ -9,7 +9,7 @@ let terminate
   terminator = terminator
 }
 
-let ir_term instrs env =
+let ir_term env instrs =
   let open Libwasm.Ast in
   let rec transform_instrs env generated (instrs: instr list) =
     let label_and_args env (n: int32 phrase) =
@@ -248,3 +248,34 @@ let ir_term instrs env =
                 bind env (Stackless.Convert (cvtop, v)) (Var.type_ v)
           end in
       transform_instrs env [] instrs
+
+let ir_func functions (globs: Global.t Util.Maps.Int32Map.t) (ast_func: Libwasm.Ast.func) (func_metadata: Func.t) =
+  let open Libwasm.Types in
+  let func = ast_func.it in
+  let locals = func.locals in
+  let (FuncType (arg_tys, ret_tys)) as fty =
+    Func.type_ func_metadata in
+  let arg_params = List.map (Var.create) arg_tys in
+  let local_params = List.map (Var.create) locals in
+  let params = arg_params @ local_params in
+  let arity = List.length ret_tys in
+
+  let ret = Label.create_return arity in
+  let env =
+    Translate_env.create
+      ~stack:[]
+      ~continuation:ret
+      ~return:ret
+      ~label_stack:[ret]
+      ~locals:local_params
+      ~globals:globs
+      ~functions:functions in
+
+  let body = ir_term env func.body in
+  {
+    return = ret;
+    type_ = fty;
+    args = arg_params @ local_params;
+    body;
+  }
+

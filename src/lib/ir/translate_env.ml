@@ -4,17 +4,17 @@ type t = {
   stack : Var.t list;
   block_continuation: Label.t;
   function_return: Label.t;
-  label_stack: Label.t list;
   locals: Var.t list;
+  label_stack: Label.t list;
   globals: Global.t Int32Map.t;
   functions: Func.t Int32Map.t
 }
 
-let create ~stack ~continuation ~return ~locals ~globals ~functions = {
+let create ~stack ~continuation ~return ~label_stack ~locals ~globals ~functions = {
   stack;
   block_continuation = continuation;
   function_return = return;
-  label_stack = [];
+  label_stack;
   locals;
   globals;
   functions
