@@ -1,5 +1,6 @@
 B ../../_build/default/src/bin
 B ../../_build/default/src/lib/ir
+B ../../_build/default/src/lib/util
 FLG -w -40
 PKG bigarray
 PKG compiler-libs
@@ -8,3 +9,4 @@ PKG compiler-libs.optcomp
 PKG libwasm
 PKG unix
 S ../lib/ir
+S ../lib/util

@@ -1,4 +1,3 @@
-open Libwasm
 type t
 
 val create :
@@ -6,6 +5,7 @@ val create :
   continuation:Label.t ->
   return:Label.t ->
   locals:Var.t list ->
+  globals:Global.t Util.Maps.Int32Map.t ->
   t
 
 val continuation : t -> Label.t
@@ -24,8 +24,12 @@ val push_label : Label.t -> t -> t
 val nth_label : depth:int -> t -> Label.t
 
 (* Local variable store *)
-val set_local : Ast.var -> Var.t -> t -> t
-val get_local : Ast.var -> t -> Var.t
+val set_local : Libwasm.Ast.var -> Var.t -> t -> t
+val get_local : Libwasm.Ast.var -> t -> Var.t
 val locals : t -> Var.t list
+val with_locals : Var.t list -> t -> t
 
-val with_continuation : t -> Label.t -> t
+(* Globals *)
+val get_global : Libwasm.Ast.var -> t -> Global.t
+
+val with_continuation : Label.t -> t -> t

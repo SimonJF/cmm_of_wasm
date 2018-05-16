@@ -1,25 +1,27 @@
-open Libwasm
+open Util.Maps
 
 type t = {
   stack : Var.t list;
   block_continuation: Label.t;
   function_return: Label.t;
   label_stack: Label.t list;
-  locals: Var.t list
+  locals: Var.t list;
+  globals: Global.t Int32Map.t
 }
 
-let create ~stack ~continuation ~return ~locals = {
+let create ~stack ~continuation ~return ~locals ~globals = {
   stack;
   block_continuation = continuation;
   function_return = return;
   label_stack = [];
-  locals = locals
+  locals;
+  globals
 }
  
 let continuation env = env.block_continuation
 let return env = env.function_return
 let stack env = env.stack
-let with_continuation env lbl =
+let with_continuation lbl env =
   { env with block_continuation = lbl }
 
 let push_label lbl env = {
@@ -28,7 +30,7 @@ let push_label lbl env = {
 
 (* TODO: These are inefficient as lists -- immutable
  * arrays would be a lot better. Maybe maps? *)
-let set_local (var: Ast.var) value env =
+let set_local (var: Libwasm.Ast.var) value env =
   let rec go n = function
     | [] -> failwith "FATAL: set_local -- not enough variables"
     | x :: xs ->
@@ -37,8 +39,8 @@ let set_local (var: Ast.var) value env =
   let xs = go var.it env.locals in
   { env with locals = xs }
 
-let get_local (var: Ast.var) env =
-  Lib.List32.nth env.locals var.it
+let get_local (var: Libwasm.Ast.var) env =
+  Libwasm.Lib.List32.nth env.locals var.it
 
 let push x env = { env with stack = x :: (env.stack) }
 
@@ -69,3 +71,6 @@ let popn n env =
 
 let with_stack stack env = { env with stack }
 let locals env = env.locals
+let with_locals locals env = { env with locals }
+let get_global (var: Libwasm.Ast.var) env =
+  Int32Map.find (var.it) env.globals

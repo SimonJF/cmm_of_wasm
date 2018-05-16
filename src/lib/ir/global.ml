@@ -15,7 +15,7 @@ let create ~name (type_ : Types.global_type) =
 let name t =
   match t.name with
     | None -> None
-    | Some name -> Some (Util.name_to_string name)
+    | Some name -> Some (Util.Names.name_to_string name)
 
 let is_mutable { type_ = GlobalType (_, mut); _ } =
   match mut with
@@ -27,7 +27,7 @@ let type_ { type_ = GlobalType (typ, _); _ } = typ
 let print ppf t =
   match t.name with
     | None -> Format.fprintf ppf "g%i" t.id
-    | Some name -> Format.fprintf ppf "%s" (Util.name_to_string name)
+    | Some name -> Format.fprintf ppf "%s" (Util.Names.name_to_string name)
 
 module M = struct
   type nonrec t = t

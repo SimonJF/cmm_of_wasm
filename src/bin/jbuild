@@ -2,5 +2,5 @@
 
 (executable
   ((name cmm_of_wasm)
-   (libraries (ir libwasm compiler-libs.optcomp bigarray))
+   (libraries (ir util libwasm compiler-libs.optcomp bigarray))
 ))

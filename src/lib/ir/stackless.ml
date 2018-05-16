@@ -1,4 +1,5 @@
-open Libwasm
+open Libwasm.Ast
+open Libwasm.Types
 
 type is_rec = bool
 
@@ -19,30 +20,30 @@ and terminator =
   | Br of Branch.t
   | BrTable of { index : Var.t; es : Branch.t list; default : Branch.t }
   | If of { cond : Var.t; ifso : Branch.t; ifnot : Branch.t }
-  | Call of { func : Func_id.t; args : Var.t list; arg_type : Types.stack_type;
-              ret_type : Types.stack_type; cont : Branch.t }
-  | CallIndirect of { type_ : Types.func_type; func : Var.t; args : Var.t list; cont : Branch.t }
+  | Call of { func : Func_id.t; args : Var.t list; arg_type : stack_type;
+              ret_type : stack_type; cont : Branch.t }
+  | CallIndirect of { type_ : func_type; func : Var.t; args : Var.t list; cont : Branch.t }
 
 and expr =
   | Select of { cond : Var.t; ifso : Var.t; ifnot : Var.t }
   | GetGlobal of Global.t
-  | Load of Ast.loadop * Var.t
+  | Load of loadop * Var.t
   | MemorySize
   | MemoryGrow of Var.t
-  | Const of Values.value
-  | Test of Ast.testop * Var.t
-  | Compare of Ast.relop * Var.t * Var.t
-  | Unary of Ast.unop * Var.t
-  | Binary of Ast.binop * Var.t * Var.t
-  | Convert of Ast.cvtop * Var.t
+  | Const of Libwasm.Values.value
+  | Test of testop * Var.t
+  | Compare of relop * Var.t * Var.t
+  | Unary of unop * Var.t
+  | Binary of binop * Var.t * Var.t
+  | Convert of cvtop * Var.t
 
 and effect =
   | SetGlobal of Global.t * Var.t
-  | Store of { op : Ast.storeop; index : Var.t; value : Var.t }
+  | Store of { op : storeop; index : Var.t; value : Var.t }
 
 type func = {
   return : Label.t;
-  type_ : Types.func_type;
+  type_ : func_type;
   args : binder list;
   body : term;
 }

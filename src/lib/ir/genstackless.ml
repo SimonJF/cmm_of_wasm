@@ -1,5 +1,5 @@
 open Stackless
-open Libwasm
+open Libwasm.Source
 
 (* IR generation *)
 let terminate 
@@ -11,8 +11,8 @@ let terminate
 
 let ir_term instrs env =
   let open Libwasm.Ast in
-  let rec transform_instrs env generated (instrs: Ast.instr list) =
-    let label_and_args env (n: int32 Source.phrase) =
+  let rec transform_instrs env generated (instrs: instr list) =
+    let label_and_args env (n: int32 phrase) =
       let lbl = Translate_env.nth_label (Int32.to_int n.it) env in
       let arity = Label.arity lbl in
       let (args, _) = Translate_env.popn arity env in
@@ -41,7 +41,7 @@ let ir_term instrs env =
             let env = Translate_env.push v env in
             transform_instrs env (Let (v, x) :: generated) xs in
 
-          let bind_local (env: Translate_env.t) (var: Ast.var) (x: Var.t) =
+          let bind_local (env: Translate_env.t) (var: var) (x: Var.t) =
             let env = Translate_env.set_local var x env in
             transform_instrs env generated xs in
 
@@ -82,11 +82,9 @@ let ir_term instrs env =
 
                 (* Codegen block, with return set to captured continuation *)
                 let env =
-                  Translate_env.create
-                    ~stack:[]
-                    ~continuation:cont_lbl
-                    ~return:(Translate_env.return env)
-                    ~locals:(Translate_env.locals env) in
+                  env
+                  |> Translate_env.with_stack []
+                  |> Translate_env.with_continuation cont_lbl in
                 transform_instrs env (cont :: generated) is
             | Loop (tys, is) ->
                 (* Loop: Capture current continuation. Generate loop continuation. *)
@@ -97,11 +95,10 @@ let ir_term instrs env =
                 let locals = Translate_env.locals env in
                 let loop_params = List.map Var.rename locals in
                 let loop_env =
-                  Translate_env.create
-                    ~stack:[]
-                    ~continuation:cont_lbl
-                    ~return:(Translate_env.return env)
-                    ~locals:loop_params in
+                  env
+                  |> Translate_env.with_stack []
+                  |> Translate_env.with_continuation cont_lbl
+                  |> Translate_env.with_locals loop_params in
                 let loop_branch = Branch.create loop_lbl locals in
                 let loop_term = transform_instrs loop_env [] is in
                 let loop_cont = Cont (loop_lbl, loop_params, true, loop_term) in
@@ -111,12 +108,13 @@ let ir_term instrs env =
             | If (tys, t, f) ->
                 (* Pop condition *)
                 let (cond, env) = Translate_env.pop env in
+                let (cont_lbl, cont) = capture_continuation tys in
+
                 let fresh_env locals =
-                  Translate_env.create
-                    ~stack:[]
-                    ~continuation:(Translate_env.continuation env)
-                    ~return:(Translate_env.return env)
-                    ~locals in
+                  env
+                  |> Translate_env.with_stack []
+                  |> Translate_env.with_continuation cont_lbl
+                  |> Translate_env.with_locals locals in
 
                 (* For each branch, make a continuation with a fresh label,
                  * containing the instructions in the branch. *)
@@ -136,7 +134,6 @@ let ir_term instrs env =
                 (* Make true and false branches *)
                 let branch_t, cont_t = make_branch t in
                 let branch_f, cont_f = make_branch f in
-                let (cont_lbl, cont) = capture_continuation tys in
 
                 (* If term: condition variable, and corresponding branch instructions *)
                 let if_term =
@@ -191,8 +188,14 @@ let ir_term instrs env =
             | TeeLocal var -> 
                 let (new_val, _) = Translate_env.pop env in
                 bind_local env var new_val
-            | GetGlobal var -> failwith "todo"
-            | SetGlobal var -> failwith "todo"
+            | GetGlobal var ->
+                let global = Translate_env.get_global var env in
+                bind env (Stackless.GetGlobal global) (Global.type_ global)
+            | SetGlobal var ->
+                let (arg, env) = Translate_env.pop env in
+                let global = Translate_env.get_global var env in
+                let stmt = Stackless.Effect (Stackless.SetGlobal (global, arg)) in
+                transform_instrs env (stmt :: generated) xs
             | Load loadop ->
                 let (addr, env) = Translate_env.pop env in
                 bind env (Stackless.Load (loadop, addr)) loadop.ty
@@ -202,13 +205,13 @@ let ir_term instrs env =
                   Stackless.Store { op = storeop; index = addr; value = arg } in
                 transform_instrs env (Stackless.Effect eff :: generated) xs
             | MemorySize ->
-                bind env (Stackless.MemorySize) Types.I32Type
+                bind env (Stackless.MemorySize) Libwasm.Types.I32Type
             | MemoryGrow ->
                 let (amount, env) = Translate_env.pop env in
-                bind env (Stackless.MemoryGrow amount) Types.I32Type
+                bind env (Stackless.MemoryGrow amount) Libwasm.Types.I32Type
             | Const literal ->
                 let lit = literal.it in
-                let ty = Values.type_of lit in
+                let ty = Libwasm.Values.type_of lit in
                 bind env (Stackless.Const lit) ty
             | Test testop ->
                 let (v, env) = Translate_env.pop env in

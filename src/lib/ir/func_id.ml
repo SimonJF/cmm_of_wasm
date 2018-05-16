@@ -1,4 +1,4 @@
-open Util
+open Util.Names
 
 type t = { name: Libwasm.Ast.name option; id : int }
 let count = ref (-1)
