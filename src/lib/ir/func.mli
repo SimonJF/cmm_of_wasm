@@ -1,10 +1,11 @@
 type t
-val create : name: Libwasm.Ast.name option -> t
+val create : name: Libwasm.Ast.name option -> ty: Libwasm.Types.func_type -> t
 val print : Format.formatter -> t -> unit
 
 val is_named : t -> string -> bool
 
 val name : t -> string option
+val type_ : t -> Libwasm.Types.func_type
 
 module M : Map.OrderedType with type t = t
 module Map : sig

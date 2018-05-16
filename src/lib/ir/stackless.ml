@@ -20,8 +20,7 @@ and terminator =
   | Br of Branch.t
   | BrTable of { index : Var.t; es : Branch.t list; default : Branch.t }
   | If of { cond : Var.t; ifso : Branch.t; ifnot : Branch.t }
-  | Call of { func : Func_id.t; args : Var.t list; arg_type : stack_type;
-              ret_type : stack_type; cont : Branch.t }
+  | Call of { func : Func.t; args : Var.t list; cont : Branch.t }
   | CallIndirect of { type_ : func_type; func : Var.t; args : Var.t list; cont : Branch.t }
 
 and expr =

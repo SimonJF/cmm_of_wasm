@@ -6,16 +6,18 @@ type t = {
   function_return: Label.t;
   label_stack: Label.t list;
   locals: Var.t list;
-  globals: Global.t Int32Map.t
+  globals: Global.t Int32Map.t;
+  functions: Func.t Int32Map.t
 }
 
-let create ~stack ~continuation ~return ~locals ~globals = {
+let create ~stack ~continuation ~return ~locals ~globals ~functions = {
   stack;
   block_continuation = continuation;
   function_return = return;
   label_stack = [];
   locals;
-  globals
+  globals;
+  functions
 }
  
 let continuation env = env.block_continuation
@@ -74,3 +76,6 @@ let locals env = env.locals
 let with_locals locals env = { env with locals }
 let get_global (var: Libwasm.Ast.var) env =
   Int32Map.find (var.it) env.globals
+
+let get_function (var: Libwasm.Ast.var) env =
+  Int32Map.find (var.it) env.functions

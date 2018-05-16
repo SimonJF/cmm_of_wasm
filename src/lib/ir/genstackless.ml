@@ -168,15 +168,29 @@ let ir_term instrs env =
                   Stackless.BrTable { index; es = branches; default } in
                 terminate generated brtable_term
             | Return ->
+                (* NOTE: I don't *think* we need to do anything with
+                 * locals here as locals can't escape a function... *)
                 let arity =
                   Translate_env.continuation env
                   |> Label.arity in
                 let (returned, env) = Translate_env.popn arity env in
                 let function_return = Translate_env.return env in
-                let locals = Translate_env.locals env in
-                let branch = Branch.create function_return (returned @ locals) in
+                let branch = Branch.create function_return returned in
                 terminate generated (Stackless.Br branch)
-            | Call var -> failwith "todo"
+            | Call var ->
+                let open Libwasm.Types in
+                (* TODO: I don't think we need to do locals here? *)
+                let func = Translate_env.get_function var env in
+                let FuncType (arg_tys, ret_tys) = Func.type_ func in
+                (* Capture current continuation *)
+                let (cont_lbl, cont) = capture_continuation ret_tys in
+                (* Grab args to the function *)
+                let (args, env) = Translate_env.popn (List.length arg_tys) env in
+                let cont_branch = Branch.create cont_lbl args in
+                (* Terminate *)
+                terminate (cont :: generated) (Stackless.Call {
+                  func; args; cont = cont_branch
+                })
             | CallIndirect var -> failwith "todo"
             | GetLocal var ->
                 let open Translate_env in

@@ -1,10 +1,10 @@
 open Util.Names
 
-type t = { name: Libwasm.Ast.name option; id : int }
+type t = { name: Libwasm.Ast.name option; id : int ; ty: Libwasm.Types.func_type }
 let count = ref (-1)
-let create ~name =
+let create ~name ~ty =
   incr count;
-  { name; id = !count }
+  { name; id = !count ; ty}
 
 let print ppf t =
   match t.name with
@@ -20,6 +20,8 @@ let name t =
   match t.name with
   | None -> None
   | Some name -> Some (name_to_string name)
+
+let type_ f = f.ty
 
 module M = struct
   type nonrec t = t
