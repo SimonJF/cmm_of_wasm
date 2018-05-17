@@ -43,7 +43,7 @@ and effect =
 type func = {
   return : Label.t;
   type_ : func_type;
-  args : binder list;
+  params : binder list;
   body : term;
 }
 
@@ -53,8 +53,8 @@ type global = {
 }
 
 type module_ = {
-    funcs : func Func.Map.t;
-    start : Func.t option;
-    globals: global Global.Map.t
+    funcs : (func * Func.t) Util.Maps.Int32Map.t;
+    globals: (global * Global.t) Util.Maps.Int32Map.t;
+    start : Func.t option
     (* TODO: Fill the rest of this in *)
 }

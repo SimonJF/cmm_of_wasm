@@ -249,7 +249,11 @@ let ir_term env instrs =
           end in
       transform_instrs env [] instrs
 
-let ir_func functions (globs: Global.t Util.Maps.Int32Map.t) (ast_func: Libwasm.Ast.func) (func_metadata: Func.t) =
+let ir_func
+    (functions: Func.t Util.Maps.Int32Map.t)
+    (globs: (Stackless.global * Global.t) Util.Maps.Int32Map.t)
+    (ast_func: Libwasm.Ast.func)
+    (func_metadata: Func.t) =
   let open Libwasm.Types in
   let func = ast_func.it in
   let locals = func.locals in
@@ -275,7 +279,64 @@ let ir_func functions (globs: Global.t Util.Maps.Int32Map.t) (ast_func: Libwasm.
   {
     return = ret;
     type_ = fty;
-    args = arg_params @ local_params;
+    params;
     body;
   }
+
+let ir_module (ast_mod: Libwasm.Ast.module_) =
+    let open Util.Maps in
+    let module Ast = Libwasm.Ast in
+    let ast_mod = ast_mod.it in
+    let types_map =
+      List.fold_left (fun (i, acc) ty ->
+        let acc = Int32Map.add i (ty.it) acc in
+        (Int32.(add i one), acc)) (0l, Int32Map.empty) ast_mod.types |> snd in
+
+    (* Create the function metadata map *)
+    let func_metadata_map =
+      List.fold_left (fun (i, acc) funcs ->
+        let ty = Int32Map.find i types_map in
+        let md = Func.create ~name:None ~ty:ty in
+        (Int32.(add i one), Int32Map.add i md acc))
+      (0l, Int32Map.empty) ast_mod.funcs |> snd in
+
+    (* Next, prepare all of the globals *)
+    let globals =
+      List.fold_left (fun (i, acc) (glob: Ast.global) ->
+        let glob = glob.it in
+        (* My understanding from the spec is that this *must*
+         * be a single value wrapped in "const"... But I may
+         * be wrong *)
+        let v =
+          match List.map (fun i -> i.it) glob.value.it with
+            | [Ast.Const lit] -> lit.it
+            | _ -> failwith "FATAL: global with non-constant value" in
+        let metadata =
+          Global.create ~name:None glob.gtype in
+        let ir_glob = { gtype = glob.gtype; value = v } in
+        let acc = Int32Map.add i (ir_glob, metadata) acc in
+        (Int32.(add i one), acc)) (0l, Int32Map.empty) ast_mod.globals
+      |> snd in
+
+    (* Now that that's all sorted, we can compile each function *)
+    let funcs =
+      let func_metadata =
+        List.map snd (Int32Map.bindings func_metadata_map) in
+      let zipped = List.combine ast_mod.funcs func_metadata in
+      List.fold_left (fun (i, acc) (func, md) ->
+        let compiled_func = ir_func func_metadata_map globals func md in
+        let acc = Int32Map.add i (compiled_func, md) acc in
+        (Int32.(add i one), acc)
+      ) (0l, Int32Map.empty) zipped 
+      |> snd in
+
+    let start =
+        (Libwasm.Lib.Option.map (fun (v: Ast.var) ->
+          Int32Map.find (v.it) func_metadata_map)) ast_mod.start in
+
+    (* And for now, that should be it? *)
+    { funcs; globals; start }
+
+
+
 
