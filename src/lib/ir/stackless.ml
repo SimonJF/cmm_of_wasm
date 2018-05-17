@@ -5,6 +5,10 @@ type is_rec = bool
 
 type binder = Var.t
 
+type store_op = {
+    op : storeop; index : Var.t; value : Var.t
+}
+
 type term = {
   body : statement list;
   terminator : terminator
@@ -38,8 +42,8 @@ and expr =
 
 and effect =
   | SetGlobal of Global.t * Var.t
-  | Store of { op : storeop; index : Var.t; value : Var.t }
-
+  | Store of store_op
+  
 type func = {
   return : Label.t;
   type_ : func_type;

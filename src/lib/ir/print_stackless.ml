@@ -10,25 +10,45 @@ module Memops = struct
   open Libwasm
   (* open Libwasm.Ast *)
 
-  let memop name (mem_op: 'a Libwasm.Ast.memop) =
-    Arrange.value_type mem_op.ty ^ "." ^ name ^
-    (if (mem_op.offset) = 0l then "" else " offset=" ^ Arrange.nat32 (mem_op.offset)) ^
-    (if 1 lsl (mem_op.align) = Types.size mem_op.ty then "" else " align=" ^ Arrange.nat (1 lsl mem_op.align))
-
-  let loadop (op: Libwasm.Ast.loadop) =
-    match op.sz with
-    | None -> memop "load" op
-    | Some (sz, ext) -> memop ("load" ^ Arrange.pack_size sz ^ Arrange.extension ext) op
-
-  let storeop (op: Libwasm.Ast.storeop) : string =
-    match op.sz with
-    | None -> memop "store" op
-    | Some sz -> memop ("store" ^ Arrange.pack_size sz) op
 end
+
+
+let sexpr_of_effect e =
+  (*
+  let open Libwasm.Ast in
+  let open Stackless in
+  *)
+  let head, inner =
+    match e with
+      | Stackless.SetGlobal (glob, v) ->
+          "set_global", 
+          [Global.to_sexpr glob; var_atom v]
+      | Stackless.Store store_op -> 
+          let open Libwasm in
+          let op = store_op.op in
+          let idx = Var.to_string store_op.index in
+          let value = Var.to_string store_op.value in
+          Arrange.storeop op ^ ", idx: " ^ idx ^ " = " ^ value, [] in
+  Node (head, inner)
+
+
 
 let rec sexpr_of_term = failwith "TODO"
 
-and sexpr_of_statement = failwith "TODO"
+and sexpr_of_statement stmt =
+  let head, inner =
+  let open Stackless in
+    match stmt with
+      | Cont (lbl, binders, is_rec, term) ->
+          "cont ",
+            [Label.to_sexpr lbl;
+             Atom (concat_args binders ^ " . ");
+             Atom (if is_rec then "rec" else "not-rec");
+             sexpr_of_term term]
+      | Let (v, e) ->
+          "let " ^ (Var.to_string v) ^ " = ", [sexpr_of_expr e]
+      | Effect e -> "effect", [sexpr_of_effect e] in
+  Node (head, inner)
 
 and sexpr_of_terminator term =
   let head, inner =
@@ -58,20 +78,34 @@ and sexpr_of_terminator term =
           in
   Node (head, inner)
 
-and sexpr_of_expr = failwith "TODO"
-
-and sexpr_of_effect e =
-  let open Libwasm.Ast in
-  let open Stackless in
+and sexpr_of_expr expr =
   let head, inner =
-    match e with
-      | SetGlobal (glob, v) ->
-          "set_global", 
-          [Global.to_sexpr glob; var_atom v]
-      | Store op -> 
-          "store_op", []
-          (* I GIVE UP!!!! 
-           * [Atom (Libwasm.Arrange.storeop op)] *)in
+    match expr with
+      | Select { cond; ifso; ifnot } -> failwith "TODO"
+      | GetGlobal glob -> failwith "TODO"
+      | Load (op, v) -> failwith "TODO"
+      | MemorySize -> "memory_size", []
+      | MemoryGrow v -> "memory_grow: " ^ (Var.to_string v), []
+      | Const v -> "const " ^ (Libwasm.Values.string_of_value v), []
+      | Test (op, v) ->
+          let v = Var.to_string v in
+          "(" ^ (Libwasm.Arrange.testop op) ^ ") " ^ v, []
+      | Compare (op, v1, v2) ->
+          let v1 = Var.to_string v1 in
+          let v2 = Var.to_string v2 in
+          "(" ^ (Libwasm.Arrange.relop op) ^ ") " ^
+          v1 ^ " " ^ v2, []
+      | Unary (op, v) ->
+          let v = Var.to_string v in
+          "(" ^ (Libwasm.Arrange.unop op) ^ ") " ^ v, []
+      | Binary (op, v1, v2) ->
+          let v1 = Var.to_string v1 in
+          let v2 = Var.to_string v2 in
+          "(" ^ (Libwasm.Arrange.binop op) ^ ") " ^
+          v1 ^ " " ^ v2, []
+      | Convert (op, v) ->
+          let v = Var.to_string v in
+          "(" ^ (Libwasm.Arrange.cvtop op) ^ ") " ^ v, [] in
   Node (head, inner)
 
 and sexpr_of_func func name = failwith "TODO"
