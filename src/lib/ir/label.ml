@@ -15,6 +15,10 @@ module Id = struct
 
   let reset () = count := -1
 
+  let to_string = function
+    | Gen i -> "gen " ^ string_of_int i
+    | Return -> "return"
+
   module M = struct
     type nonrec t = t
     let compare = Pervasives.compare
@@ -40,3 +44,8 @@ let create_return ~arity = {
 
 let id lbl = lbl.id
 let arity lbl = lbl.arity
+
+let to_sexpr x =
+  Libwasm.Sexpr.Atom ("lbl " ^ (Id.to_string x.id) ^ ": " ^
+    (string_of_int x.arity))
+

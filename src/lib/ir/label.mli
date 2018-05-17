@@ -15,3 +15,4 @@ val create : arity:int -> t
 val create_return : arity:int -> t
 val id : t -> Id.t 
 val arity : t -> int
+val to_sexpr : t -> Libwasm.Sexpr.sexpr

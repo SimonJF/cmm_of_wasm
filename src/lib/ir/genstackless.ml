@@ -271,7 +271,7 @@ let ir_func
       ~continuation:ret
       ~return:ret
       ~label_stack:[ret]
-      ~locals:local_params
+      ~locals:params
       ~globals:globs
       ~functions:functions in
 

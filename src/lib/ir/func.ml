@@ -23,6 +23,18 @@ let name t =
 
 let type_ f = f.ty
 
+let to_sexpr x =
+  let open Libwasm.Sexpr in
+  let name =
+    match name x with
+      | Some name ->
+          [Atom ("name " ^ name)]
+      | None -> [] in
+  Node ("fn ", name @ [
+    Atom ("id " ^ string_of_int x.id);
+    Atom ("ty " ^ Libwasm.Types.string_of_func_type x.ty)
+  ])
+
 module M = struct
   type nonrec t = t
   let compare a b = compare a.id b.id

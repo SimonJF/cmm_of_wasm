@@ -6,6 +6,8 @@ val type_ : t -> Libwasm.Types.value_type
 
 val name : t -> string option
 
+val to_sexpr : t -> Libwasm.Sexpr.sexpr
+
 module M : Map.OrderedType with type t = t
 module Map : sig
   include Map.S with type 'a t = 'a Map.Make(M).t and type key = t

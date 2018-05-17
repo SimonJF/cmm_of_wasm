@@ -29,6 +29,19 @@ let print ppf t =
     | None -> Format.fprintf ppf "g%i" t.id
     | Some name -> Format.fprintf ppf "%s" (Util.Names.name_to_string name)
 
+let to_sexpr x =
+  let open Libwasm.Sexpr in
+  let name =
+    match name x with
+      | None -> []
+      | Some name -> [Atom ("name " ^ name)] in
+
+  Node ("global", name @ [
+    Atom ("id " ^ (string_of_int x.id));
+    Atom ("type " ^ (Types.string_of_global_type x.type_))
+  ])
+
+
 module M = struct
   type nonrec t = t
   let compare a b = compare a.id b.id
