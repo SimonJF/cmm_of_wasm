@@ -6,18 +6,8 @@ let var_atom v = Atom ("var " ^ (Var.to_string v))
 let concat_args xs =
   List.map (Var.to_string) xs |> String.concat " "
 
-module Memops = struct
-  open Libwasm
-  (* open Libwasm.Ast *)
-
-end
-
-
 let sexpr_of_effect e =
-  (*
-  let open Libwasm.Ast in
   let open Stackless in
-  *)
   let head, inner =
     match e with
       | Stackless.SetGlobal (glob, v) ->
@@ -32,8 +22,10 @@ let sexpr_of_effect e =
   Node (head, inner)
 
 
-
-let rec sexpr_of_term = failwith "TODO"
+let rec sexpr_of_term (term: Stackless.term) =
+  let body = Node ("body", list sexpr_of_statement term.body) in
+  let terminator = Node ("terminator", [sexpr_of_terminator term.terminator]) in
+  Node ("term", [body; terminator])
 
 and sexpr_of_statement stmt =
   let head, inner =
@@ -81,9 +73,14 @@ and sexpr_of_terminator term =
 and sexpr_of_expr expr =
   let head, inner =
     match expr with
-      | Select { cond; ifso; ifnot } -> failwith "TODO"
-      | GetGlobal glob -> failwith "TODO"
-      | Load (op, v) -> failwith "TODO"
+      | Select { cond; ifso; ifnot } ->
+          let str = Var.to_string in
+          "select", [
+            (Atom ("cond: " ^ (str cond)));
+            (Atom ("ifso: " ^ (str ifso)));
+            (Atom ("ifnot: " ^ (str ifnot)))]
+      | GetGlobal glob -> "get_global", [Global.to_sexpr glob]
+      | Load (op, v) -> (Libwasm.Arrange.loadop op) ^ ": " ^ (Var.to_string v), []
       | MemorySize -> "memory_size", []
       | MemoryGrow v -> "memory_grow: " ^ (Var.to_string v), []
       | Const v -> "const " ^ (Libwasm.Values.string_of_value v), []
@@ -108,7 +105,12 @@ and sexpr_of_expr expr =
           "(" ^ (Libwasm.Arrange.cvtop op) ^ ") " ^ v, [] in
   Node (head, inner)
 
-and sexpr_of_func func name = failwith "TODO"
+and sexpr_of_func (func: Stackless.func) name =
+  Node ("func",
+    [Label.to_sexpr func.return;
+     Atom (": " ^ Libwasm.Types.string_of_func_type func.type_);
+     Atom (concat_args func.params);
+     Node ("body", [sexpr_of_term func.body])])
 
 
 
