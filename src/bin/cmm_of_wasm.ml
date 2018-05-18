@@ -39,6 +39,8 @@ let compile_module (_name_opt, module_) =
   Libwasm.Valid.check_module module_;
   (* Generate stackless IR representation *)
   let ir = Ir.Genstackless.ir_module module_ in
+  trace "Module: ";
+  trace (Ir.Print_stackless.string_of_module ir);
   (* TODO: Compilation / IR debugging here *)
   trace "Time to do something with the IR here"
 

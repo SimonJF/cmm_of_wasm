@@ -1,4 +1,5 @@
 B ../../_build/default/src/bin
+B ../../_build/default/src/lib/cmmcompile
 B ../../_build/default/src/lib/ir
 B ../../_build/default/src/lib/util
 FLG -w -40
@@ -9,5 +10,6 @@ PKG compiler-libs.optcomp
 PKG getopt
 PKG libwasm
 PKG unix
+S ../lib/cmmcompile
 S ../lib/ir
 S ../lib/util

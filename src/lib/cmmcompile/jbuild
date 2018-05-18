@@ -1,0 +1,7 @@
+(jbuild_version 1)
+
+(library
+  ((name cmmcompile)
+   (libraries (ir libwasm util compiler-libs.common compiler-libs.optcomp))
+  )
+)

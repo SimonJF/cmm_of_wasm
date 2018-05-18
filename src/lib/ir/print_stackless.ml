@@ -112,11 +112,30 @@ and sexpr_of_func (func: Stackless.func) name =
      Atom (concat_args func.params);
      Node ("body", [sexpr_of_term func.body])])
 
-
+and sexpr_of_global (glob: Stackless.global) =
+  let open Libwasm in
+  Node ("global",
+    [
+      Atom ("ty: " ^ Types.string_of_global_type glob.gtype);
+      Atom ("val: " ^ Values.string_of_value glob.value)
+    ])
 
 let const c = list sexpr_of_expr c
 
-let sexpr_of_module m = failwith "TODO"
+let sexpr_of_module (m: Stackless.module_) =
+  let open Util.Maps in
+  let funcs = Int32Map.bindings m.funcs in
+  let globals = Int32Map.bindings m.globals in
+  let sexpr_of_func_def (_, (f, md)) =
+    Node ("func",
+      [ Func.to_sexpr md; sexpr_of_func f (Func.name md) ]) in
+  let sexpr_of_global_def (_, (g, md)) =
+    Node ("global",
+      [ Global.to_sexpr md; sexpr_of_global g ]) in
+  let funcs = Node ("funcs", List.map sexpr_of_func_def funcs) in
+  let globals = Node ("globals", List.map sexpr_of_global_def globals) in
+  Node ("module", [funcs; globals])
+
 
 let string_of_module m =
   let open Libwasm in
