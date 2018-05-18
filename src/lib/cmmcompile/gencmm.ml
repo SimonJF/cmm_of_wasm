@@ -19,8 +19,7 @@ let compile_value =
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
   | F32 x -> failwith "32-bit floats not yet supported"
   | F64 x -> failwith "TODO" (* Cconst_float x *)
-
-let compile_testop _ = failwith "TODO"
+ 
 let compile_relop _ = failwith "TODO"
 let compile_unop _ = failwith "TODO"
 let compile_binop _ = failwith "TODO"
@@ -37,9 +36,15 @@ let compile_expression env =
   | MemoryGrow v -> failwith "TODO"
   | Const value -> compile_value value
   | Test (test, v) ->
-      let op = compile_testop test in
       let i = lv env v in
-      Cop (op, [Cvar i], nodbg)
+      let cmp = 
+        let open Libwasm.Types in
+        match Var.type_ v with
+          | I32Type -> Cconst_int 0
+          | I64Type -> Cconst_natint Nativeint.zero
+          | _ -> failwith "Eqz not implemented on floats"
+        in
+      Cop (Ccmpi Ceq, [Cvar i; cmp], nodbg)
   | Compare (rel, v1, v2) ->
       let op = compile_relop rel in
       let (i1, i2) = (lv env v1, lv env v2) in
