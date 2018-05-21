@@ -5,7 +5,6 @@ open Cmm
 let lv env x = Compile_env.lookup_var x env
 
 let nodbg = Debuginfo.none
-let compile_terminator t = failwith "TODO"
 
 (* We're making the assumption here that we're on a 64-bit architecture at the moment.
  * FIXME: We're (erroneously) treating 32-bit integers as 64-bit integers here.
@@ -20,10 +19,73 @@ let compile_value =
   | F32 x -> failwith "32-bit floats not yet supported"
   | F64 x -> failwith "TODO" (* Cconst_float x *)
  
-let compile_relop _ = failwith "TODO"
-let compile_unop _ = failwith "TODO"
-let compile_binop _ = failwith "TODO"
-let compile_cvtop _ = failwith "TODO"
+let compile_relop =
+  let open Libwasm.Ast in
+  let open Libwasm.Values in
+    let compile_float_op =
+    let open Libwasm.Ast.FloatOp in
+    function
+      | Eq -> CFeq
+      | Ne -> CFneq
+      | Lt -> CFlt
+      | Gt -> CFgt
+      | Le -> CFle
+      | Ge -> CFge in
+    (* FIXME: ignoring signedness for the time being, just getting skeletons up and running *)
+    let compile_int_op =
+    let open Libwasm.Ast.IntOp in
+    function
+      | Eq -> Ceq
+      | Ne -> Cne
+      | LtS -> Clt
+      | LtU -> Clt
+      | GtS -> Cgt
+      | GtU -> Cgt
+      | LeS -> Cle
+      | LeU -> Cle
+      | GeS -> Cge
+      | GeU -> Cge in
+    function
+      | I32 i32op -> Ccmpi (compile_int_op i32op)
+      | I64 i64op -> Ccmpi (compile_int_op i64op)
+      | F64 f64op -> Ccmpf (compile_float_op f64op)
+      | _ -> failwith "F32s not supported yet"
+
+let compile_unop _ = failwith "TODO: I have no idea what any of these mean yet"
+let compile_binop op = 
+  let open Libwasm.Ast in
+  let open Libwasm.Values in
+  (* FIXME: Signedness for division / modulo *)
+  let compile_int_op =
+    let open Libwasm.Ast.IntOp in
+    function
+    | Add -> Caddi
+    | Sub -> Csubi
+    | Mul -> Cmuli
+    | DivS -> Cdivi
+    | DivU -> Cdivi
+    | RemS -> Cmodi
+    | RemU -> Cmodi
+    (* TODO: Ensure that these are actually bitwise
+     * operators and not just binary ones...*)
+    | And -> Cand
+    | Or -> Cor
+    | Xor -> Cxor
+    (* TODO: Shift right operators ignore signedness right now... *)
+    | Shl -> Clsl
+    | ShrS -> Clsr
+    | ShrU -> Clsr
+    | Rotl -> failwith "Rotation unimplemented"
+    | Rotr -> failwith "Rotation unimplemented" in
+  let compile_float_op = failwith "TODO" in
+  match op with
+    | I32 i32op -> compile_int_op i32op
+    | I64 i64op -> compile_int_op i64op
+    | F32 f32op -> compile_float_op f32op
+    | F64 f64op -> compile_float_op f64op
+  
+  
+let compile_cvtop _ = failwith "Conversion operators not done yet"
 
 let compile_expression env =
   let open Ir.Stackless in
@@ -60,14 +122,54 @@ let compile_expression env =
       let op = compile_cvtop cvt in
       Cop (op, [Cvar (lv env v)], nodbg)
 
+module TrapReasons : sig
+  val unreachable : int
+end = struct
+  let unreachable = 0
+end
+
+let trap reason =
+  Cop (Cextcall ("__Cmmwasm_trap", typ_int, false, None), 
+    [Cconst_int reason], nodbg)
+
+let compile_terminator env = 
+  let open Stackless in
+  let branch b =
+    let br_id = Compile_env.lookup_label (Branch.label b) env in
+    let args =
+      List.map (fun v ->
+        Cvar (Compile_env.lookup_var v env)) (Branch.arguments b) in
+    Cexit (br_id, args) in
+  function
+    | Unreachable -> trap (TrapReasons.unreachable)
+    | Br b -> branch b
+    | BrTable { index ; es ; default } -> failwith "TODO"
+    | If { cond; ifso; ifnot } ->
+        let cond = Cvar (Compile_env.lookup_var cond env) in
+        let true_branch = branch ifso in
+        let false_branch = branch ifnot in
+        Cifthenelse (cond, true_branch, false_branch)
+    | Call { func ; args; cont } -> failwith "TODO"
+    | CallIndirect { type_; func; args; cont } -> failwith "TODO"
+
 (* compile_body: env -> W.terminator -> W.statement list -> Cmm.expression *) 
 let rec compile_body env terminator = function
-  | [] -> compile_terminator terminator
+  | [] -> compile_terminator env terminator
   | x :: xs ->
       let open Stackless in
       begin
       match x with
-        | Cont (lbl, xs, is_rec, body) -> failwith "TODO"
+        | Cont (lbl, binders, is_rec, body) ->
+            let rec_flag = if is_rec then Recursive else Nonrecursive in
+            (* TODO: Maybe this is goofy API design -- should flip parameters on
+             * lookup_var etc to avoid having to name args here *)
+            let binders_idents =
+              List.map (fun v -> Compile_env.lookup_var v env) binders in
+            let (lbl_id, env) = Compile_env.bind_label lbl env in
+            let catch_clause =
+              (lbl_id, binders_idents, compile_term env body) in
+            let cont = compile_body env terminator xs in
+            Ccatch (rec_flag, [catch_clause], cont)
         | Let (v, e) ->
             let ident = Ident.create (Var.to_string v) in
             let env = Compile_env.bind_var v ident env in
@@ -75,5 +177,6 @@ let rec compile_body env terminator = function
             Clet (ident, e1, compile_body env terminator xs)
         | Effect eff -> failwith "TODO"
       end
+and compile_term env term = compile_body env (term.terminator) (term.body)
 
 
