@@ -52,3 +52,6 @@ let bind_global_func_symbol (md: Ir.Func.t) env =
       func_symbols = 
         Ir.Func.Map.add md (Exported_symbol name) env.func_symbols 
   }
+
+let symbols env =
+  List.map snd (Ir.Func.Map.bindings env.func_symbols)

@@ -232,23 +232,35 @@ and compile_term env term = compile_body env (term.terminator) (term.body)
 (* IR function to CMM function *)
 let compile_function ir_func = failwith "TODO"
 
-(* Given a list of exports, populate the initial symbol table *)
-(* TODO: Might need to generalise this when we're incorporating non-function symbols *)
-let rec populate_exported_symbols env (ir_module: Stackless.module_) =
-  let open Libwasm.Ast in
-  List.fold_left (fun acc (export: export) ->
-    let export = export.it in
-    let str_name = Util.Names.name_to_string export.name in
-    let desc = export.edesc.it in
-    match desc with
-      | FuncExport v ->
-          let (_def, md) = Util.Maps.Int32Map.find (v.it) ir_module.funcs in
-          (* TODO: Assert export name = func name *)
-          assert (match (Func.name md) with | Some _ -> true | None -> false);
-          Compile_env.bind_global_func_symbol md env
-      | _ -> env) env ir_module.exports
 
-    
+(* Now we've named the functions in the IR pass, we can simplify this. *)
+let rec populate_symbols env (ir_module: Stackless.module_) : Compile_env.t =
+  let open Libwasm.Ast in
+  Util.Maps.Int32Map.fold (fun _ (_, md) acc ->
+    match Func.name md with
+      | Some _name -> Compile_env.bind_global_func_symbol md env
+      | None -> Compile_env.bind_internal_func_symbol md env |> snd
+  ) (ir_module.funcs) env 
+
+
+(* Not sure whether this is even what we want... *)
+let symbol_table env : Cmm.phrase =
+  let open Symbol in
+  let generate_cmm_symbol = function
+    | Exported_symbol s -> [Cglobal_symbol s; Cdefine_symbol s]
+    | Internal_symbol s -> [Cdefine_symbol s] in
+  (* symbols : Symbol list *)
+  (* generate_cmm_symbol : Symbol -> Cmm symbol list *)
+  (* mapped : List.map generate_cmm_symbol symbols : Cmm symbol list list) *)
+  (* List.flatten mapped : Cmm symbol list *)
+  (* List.map Cdata mapped : Cmm phrase list *)
+  (* !?!? *)
+  let symbs =
+    Compile_env.symbols env
+    |> List.map generate_cmm_symbol
+    |> List.concat in
+  Cdata symbs
+  
 
 (* IR function to CMM phrase list *)
 let compile_module = failwith "TODO"
