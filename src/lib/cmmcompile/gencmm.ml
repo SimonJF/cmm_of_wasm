@@ -230,8 +230,31 @@ and compile_term env term = compile_body env (term.terminator) (term.body)
 
 
 (* IR function to CMM function *)
-let compile_function ir_func = failwith "TODO"
-
+let compile_function (ir_func: Stackless.func) func_md env =
+  (* Name *)
+  let name =
+    Compile_env.lookup_func_symbol func_md env
+    |> Symbol.name in
+  (* Arguments: Need to bind each param in the env we will
+   * use to compile the function, and pair with machtype *)
+  let FuncType (arg_tys, _) = Func.type_ func_md in
+  let zipped =
+    List.combine ir_func.params arg_tys in
+  let (args_rev, env) =
+    List.fold_left (fun (acc, env) (param, ty) ->
+      let (ident, env) = bind_var param env in
+      let cmm_ty = compile_type ty in
+      ((ident, cmm_ty) :: acc, env)) ([], env) zipped in
+  (* With updated env, compile function body *)
+  let body = compile_term env ir_func.body in
+  (* Finally, we can put it all together... *)
+  {
+    fun_name = name;
+    fun_args = List.rev args_rev;
+    fun_body = body;
+    fun_codegen_options = [No_CSE];
+    fun_dbg = nodbg
+  }
 
 (* Now we've named the functions in the IR pass, we can simplify this. *)
 let rec populate_symbols env (ir_module: Stackless.module_) : Compile_env.t =
@@ -249,12 +272,6 @@ let symbol_table env : Cmm.phrase =
   let generate_cmm_symbol = function
     | Exported_symbol s -> [Cglobal_symbol s; Cdefine_symbol s]
     | Internal_symbol s -> [Cdefine_symbol s] in
-  (* symbols : Symbol list *)
-  (* generate_cmm_symbol : Symbol -> Cmm symbol list *)
-  (* mapped : List.map generate_cmm_symbol symbols : Cmm symbol list list) *)
-  (* List.flatten mapped : Cmm symbol list *)
-  (* List.map Cdata mapped : Cmm phrase list *)
-  (* !?!? *)
   let symbs =
     Compile_env.symbols env
     |> List.map generate_cmm_symbol
