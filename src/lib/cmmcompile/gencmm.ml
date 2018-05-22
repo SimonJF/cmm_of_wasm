@@ -1,6 +1,7 @@
 (* Compile Stackless into CMM *)
 open Ir
 open Cmm
+open Symbol
 
 let lv env x = Compile_env.lookup_var x env
 
@@ -176,7 +177,7 @@ let compile_terminator env =
         (* We'll need to do some fun with tuples to properly handle
          * functions which return more than one value *)
         let args_cvars = List.map (fun v -> Cvar (lv env v)) args in
-        let symbol_name = Compile_env.lookup_func_symbol func env in
+        let symbol_name = Compile_env.lookup_func_symbol func env |> Symbol.name in
         let fn_symbol = Cconst_symbol symbol_name in
         (* Cop (Capply <return type>, <args>, dbg) *)
         let br_id = Compile_env.lookup_label (Branch.label cont) env in
@@ -213,8 +214,6 @@ let rec compile_body env terminator = function
       match x with
         | Cont (lbl, binders, is_rec, body) ->
             let rec_flag = if is_rec then Recursive else Nonrecursive in
-            (* TODO: Maybe this is goofy API design -- should flip parameters on
-             * lv etc to avoid having to name args here *)
             let binders_idents = List.map (lv env) binders in
             let (lbl_id, env) = Compile_env.bind_label lbl env in
             let catch_clause =
@@ -229,4 +228,28 @@ let rec compile_body env terminator = function
       end
 and compile_term env term = compile_body env (term.terminator) (term.body)
 
+
+(* IR function to CMM function *)
+let compile_function ir_func = failwith "TODO"
+
+(* Given a list of exports, populate the initial symbol table *)
+(* TODO: Might need to generalise this when we're incorporating non-function symbols *)
+let rec populate_exported_symbols env (ir_module: Stackless.module_) =
+  let open Libwasm.Ast in
+  List.fold_left (fun acc (export: export) ->
+    let export = export.it in
+    let str_name = Util.Names.name_to_string export.name in
+    let desc = export.edesc.it in
+    match desc with
+      | FuncExport v ->
+          let (_def, md) = Util.Maps.Int32Map.find (v.it) ir_module.funcs in
+          (* TODO: Assert export name = func name *)
+          assert (match (Func.name md) with | Some _ -> true | None -> false);
+          Compile_env.bind_global_func_symbol md env
+      | _ -> env) env ir_module.exports
+
+    
+
+(* IR function to CMM phrase list *)
+let compile_module = failwith "TODO"
 

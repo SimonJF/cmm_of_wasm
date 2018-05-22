@@ -59,6 +59,7 @@ type global = {
 type module_ = {
     funcs : (func * Func.t) Util.Maps.Int32Map.t;
     globals: (global * Global.t) Util.Maps.Int32Map.t;
-    start : Func.t option
+    start : Func.t option;
     (* TODO: Fill the rest of this in *)
+    exports : Libwasm.Ast.export list
 }

@@ -334,8 +334,9 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         (Libwasm.Lib.Option.map (fun (v: Ast.var) ->
           Int32Map.find (v.it) func_metadata_map)) ast_mod.start in
 
+    let exports = ast_mod.exports in
     (* And for now, that should be it? *)
-    { funcs; globals; start }
+    { funcs; globals; start ; exports }
 
 
 
