@@ -1,13 +1,17 @@
 type t = {
   var_env : Ident.t Ir.Var.Map.t;
   label_env : int Ir.Label.Id.Map.t;
-  label_count : int
+  label_count : int;
+  func_symbols : string Ir.Func.Map.t;
+  func_count : int
 }
 
 let empty = {
   var_env = Ir.Var.Map.empty;
   label_env = Ir.Label.Id.Map.empty;
   label_count = 0;
+  func_count = 0;
+  func_symbols = Ir.Func.Map.empty
 }
 
 let bind_var v i env = {
@@ -24,3 +28,15 @@ let bind_label lbl env =
       label_env = Ir.Label.Id.Map.add (Ir.Label.id lbl) lbl_id env.label_env })
 
 let lookup_label lbl env = Ir.Label.Id.Map.find (Ir.Label.id lbl) env.label_env 
+
+let bind_func_symbol func env =
+  (* FIXME: This will not be sufficient
+   * for when we have separate compilation...
+   * Will also need to think harder about exports, etc. *)
+  let symbol = "_wasm" ^ (string_of_int env.func_count) in
+  let new_env =
+    { env with func_count = env.func_count + 1;
+      func_symbols = Ir.Func.Map.add func symbol env.func_symbols } in
+  (symbol, new_env)
+
+let lookup_func_symbol func env = Ir.Func.Map.find func env.func_symbols

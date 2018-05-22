@@ -4,6 +4,11 @@ open Cmm
 
 let lv env x = Compile_env.lookup_var x env
 
+let bind_var v env =
+  let ident = Ident.create (Var.to_string v) in
+  let env = Compile_env.bind_var v ident env in
+  (ident, env)
+
 let nodbg = Debuginfo.none
 
 (* We're making the assumption here that we're on a 64-bit architecture at the moment.
@@ -87,6 +92,15 @@ let compile_binop op =
   
 let compile_cvtop _ = failwith "Conversion operators not done yet"
 
+let compile_type : Libwasm.Types.value_type -> machtype = 
+  let open Libwasm.Types in
+  function
+    | I32Type -> typ_int
+    | I64Type -> typ_int
+    | F32Type -> typ_float
+    | F64Type -> typ_float
+
+
 let compile_expression env =
   let open Ir.Stackless in
   function
@@ -134,19 +148,18 @@ let trap reason =
 
 let compile_terminator env = 
   let open Stackless in
-  let lookup_var env v = Compile_env.lookup_var v env in
   let branch b =
     let br_id = Compile_env.lookup_label (Branch.label b) env in
     let args =
       List.map (fun v ->
-        Cvar (lookup_var env v)) (Branch.arguments b) in
+        Cvar (lv env v)) (Branch.arguments b) in
     Cexit (br_id, args) in
   function
     | Unreachable -> trap (TrapReasons.unreachable)
     | Br b -> branch b
     | BrTable { index ; es ; default } -> failwith "TODO"
     | If { cond; ifso; ifnot } ->
-        let cond_var = Cvar (lookup_var env cond) in
+        let cond_var = Cvar (lv env cond) in
         let test = 
           Cop (Ccmpi Ceq, [cond_var; Cconst_natint Nativeint.zero],
             nodbg) in
@@ -159,8 +172,36 @@ let compile_terminator env =
          * In addition, the continuation will take the return
          * type(s) of the function, so should be prepended. 
          * ...I think? *)
-
-        failwith "TODO"
+        let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
+        (* We'll need to do some fun with tuples to properly handle
+         * functions which return more than one value *)
+        let args_cvars = List.map (fun v -> Cvar (lv env v)) args in
+        let symbol_name = Compile_env.lookup_func_symbol func env in
+        let fn_symbol = Cconst_symbol symbol_name in
+        (* Cop (Capply <return type>, <args>, dbg) *)
+        let br_id = Compile_env.lookup_label (Branch.label cont) env in
+        let branch_args = Branch.arguments cont in
+        let cont_args_cvars =
+          List.map (fun v -> Cvar (lv env v)) branch_args in
+        (* No return values: typ_void in call, csequence, and branch args *)
+        let compile_noreturn =
+          let call = Cop (Capply typ_void, fn_symbol :: args_cvars, nodbg) in
+          Csequence (call, Cexit (br_id, cont_args_cvars)) in
+        (* One return value: let-composition, result goes on head of args *)
+        let compile_return1 ty =
+          let call =
+            Cop (Capply (compile_type ty), fn_symbol :: args_cvars, nodbg) in
+          let fresh_id = Ident.create ("_call" ^ symbol_name) in
+          Clet (fresh_id, call,
+            Cexit (br_id, (Cvar fresh_id) :: cont_args_cvars)) in
+        begin
+          match ret_tys with
+            | [] -> compile_noreturn
+            | [ty] -> compile_return1 ty
+            | _ -> 
+                failwith ("Can't currently compile functions with " 
+                  ^ "more than one return type")
+        end
     | CallIndirect { type_; func; args; cont } -> failwith "TODO"
 
 (* compile_body: env -> W.terminator -> W.statement list -> Cmm.expression *) 
@@ -173,17 +214,15 @@ let rec compile_body env terminator = function
         | Cont (lbl, binders, is_rec, body) ->
             let rec_flag = if is_rec then Recursive else Nonrecursive in
             (* TODO: Maybe this is goofy API design -- should flip parameters on
-             * lookup_var etc to avoid having to name args here *)
-            let binders_idents =
-              List.map (fun v -> Compile_env.lookup_var v env) binders in
+             * lv etc to avoid having to name args here *)
+            let binders_idents = List.map (lv env) binders in
             let (lbl_id, env) = Compile_env.bind_label lbl env in
             let catch_clause =
               (lbl_id, binders_idents, compile_term env body) in
             let cont = compile_body env terminator xs in
             Ccatch (rec_flag, [catch_clause], cont)
         | Let (v, e) ->
-            let ident = Ident.create (Var.to_string v) in
-            let env = Compile_env.bind_var v ident env in
+            let (ident, env) = bind_var v env in
             let e1 = compile_expression env e in
             Clet (ident, e1, compile_body env terminator xs)
         | Effect eff -> failwith "TODO"
