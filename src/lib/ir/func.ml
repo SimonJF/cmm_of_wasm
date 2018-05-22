@@ -2,9 +2,9 @@ open Util.Names
 
 type t = { name: Libwasm.Ast.name option; id : int ; ty: Libwasm.Types.func_type }
 let count = ref (-1)
-let create ~name ~ty =
+let create ty =
   incr count;
-  { name; id = !count ; ty}
+  { name = None; id = !count ; ty}
 
 let print ppf t =
   match t.name with
@@ -46,3 +46,5 @@ module Map = struct
         Format.fprintf ppf "@ (@[%a@ %a@])" print id f v) s in
     Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
 end
+
+let with_name f name = { f with name = Some name }

@@ -1,6 +1,9 @@
 type t
-val create : name: Libwasm.Ast.name option -> ty: Libwasm.Types.func_type -> t
+val create : Libwasm.Types.func_type -> t
+
 val print : Format.formatter -> t -> unit
+
+val with_name : t -> Libwasm.Ast.name -> t
 
 val is_named : t -> string -> bool
 

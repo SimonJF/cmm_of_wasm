@@ -296,7 +296,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let func_metadata_map =
       List.fold_left (fun (i, acc) funcs ->
         let ty = Int32Map.find i types_map in
-        let md = Func.create ~name:None ~ty:ty in
+        let md = Func.create ty in
         (Int32.(add i one), Int32Map.add i md acc))
       (0l, Int32Map.empty) ast_mod.funcs |> snd in
 
@@ -318,6 +318,28 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         (Int32.(add i one), acc)) (0l, Int32Map.empty) ast_mod.globals
       |> snd in
 
+    (* Next, traverse exports and name function metadata *)
+    let func_metadata_map =
+      let open Libwasm.Ast in
+      List.fold_left (fun acc export ->
+        let export = export.it in
+        match export.edesc.it with
+          | FuncExport v ->
+              let v = v.it in
+              let md = Int32Map.find v acc in
+              begin
+                match Func.name md with
+                  | Some _fn_name ->
+                      (* Already added *)
+                      acc
+                  | None ->
+                      (* Re-add function with export name *)
+                      let md = Func.with_name md export.name in
+                      Int32Map.add v md acc
+              end
+          | _ -> (* Other exports don't matter on this pass *) acc
+      ) func_metadata_map ast_mod.exports in
+
     (* Now that that's all sorted, we can compile each function *)
     let funcs =
       let func_metadata =
@@ -329,6 +351,8 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         (Int32.(add i one), acc)
       ) (0l, Int32Map.empty) zipped 
       |> snd in
+
+    (* Finally, grab the start function, if one exists *)
 
     let start =
         (Libwasm.Lib.Option.map (fun (v: Ast.var) ->
