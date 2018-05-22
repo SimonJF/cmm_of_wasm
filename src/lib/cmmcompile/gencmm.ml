@@ -134,22 +134,33 @@ let trap reason =
 
 let compile_terminator env = 
   let open Stackless in
+  let lookup_var env v = Compile_env.lookup_var v env in
   let branch b =
     let br_id = Compile_env.lookup_label (Branch.label b) env in
     let args =
       List.map (fun v ->
-        Cvar (Compile_env.lookup_var v env)) (Branch.arguments b) in
+        Cvar (lookup_var env v)) (Branch.arguments b) in
     Cexit (br_id, args) in
   function
     | Unreachable -> trap (TrapReasons.unreachable)
     | Br b -> branch b
     | BrTable { index ; es ; default } -> failwith "TODO"
     | If { cond; ifso; ifnot } ->
-        let cond = Cvar (Compile_env.lookup_var cond env) in
+        let cond_var = Cvar (lookup_var env cond) in
+        let test = 
+          Cop (Ccmpi Ceq, [cond_var; Cconst_natint Nativeint.zero],
+            nodbg) in
         let true_branch = branch ifso in
         let false_branch = branch ifnot in
-        Cifthenelse (cond, true_branch, false_branch)
-    | Call { func ; args; cont } -> failwith "TODO"
+        Cifthenelse (test, true_branch, false_branch)
+    | Call { func ; args; cont } ->
+        (* Alright. We have a function, set of args, and a
+         * continuation branch, pre-populated with some args. 
+         * In addition, the continuation will take the return
+         * type(s) of the function, so should be prepended. 
+         * ...I think? *)
+
+        failwith "TODO"
     | CallIndirect { type_; func; args; cont } -> failwith "TODO"
 
 (* compile_body: env -> W.terminator -> W.statement list -> Cmm.expression *) 
