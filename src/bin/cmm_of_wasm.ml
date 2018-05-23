@@ -33,7 +33,7 @@ let print_module ast_mod =
   let open Libwasm in
   Print.module_ stdout !(Flags.width) ast_mod
 
-let compile_module (_name_opt, module_) =
+let compile_module filename (_name_opt, module_) =
   print_module module_;
   (* Validate the module *)
   Libwasm.Valid.check_module module_;
@@ -44,13 +44,13 @@ let compile_module (_name_opt, module_) =
   let cmm_phrases = Cmmcompile.Gencmm.compile_module ir in
   trace "CMM Phrases: ";
   List.iter (Printcmm.phrase Format.std_formatter) cmm_phrases;
-  trace "Time to output ASM!"
-
+  trace "Time to output ASM!";
+  Build_utils.build ~name:filename ~out_dir:"." cmm_phrases
 
 let frontend filename =
   load_wasm_script filename
   |> collect_modules
-  |> List.iter compile_module
+  |> List.iteri (fun i -> compile_module (filename ^ (string_of_int i)) )
 
 let () =
   Command_line.setup ();

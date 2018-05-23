@@ -299,7 +299,11 @@ let compile_functions env (ir_mod: Stackless.module_) =
 let compile_module (ir_mod: Stackless.module_) =
   let env = populate_symbols Compile_env.empty ir_mod in
   let funcs = compile_functions env ir_mod in
+  funcs
+  (* I think the symbols are exported anyway? *)
+  (*
   let symbs = symbol_table env in
   symbs :: funcs
+  *)
 
 
