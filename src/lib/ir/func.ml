@@ -9,7 +9,7 @@ let create ty =
 let print ppf t =
   match t.name with
   | None -> Format.fprintf ppf "f%i" t.id
-  | Some name -> Format.fprintf ppf "%s" (name_to_string name)
+  | Some name -> Format.fprintf ppf "%s:%i" (name_to_string name) t.id
 
 let is_named t name =
   match t.name with

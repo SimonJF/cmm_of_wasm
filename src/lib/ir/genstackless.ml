@@ -30,7 +30,13 @@ let ir_term env instrs =
           let arity = Label.arity cont_label in
           let (returned, _) = Translate_env.popn arity env in
           let locals = Translate_env.locals env in
-          let return_branch = Branch.create cont_label (returned @ locals) in
+          (* Function return doesn't need locals  *)
+          let args =
+            if (Label.Id.is_return (Label.id cont_label)) then
+              returned
+            else
+              returned @ locals in
+          let return_branch = Branch.create cont_label args in
           let terminator = Stackless.Br return_branch in
           terminate generated terminator
       | x :: xs ->
@@ -342,14 +348,12 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
 
     (* Now that that's all sorted, we can compile each function *)
     let funcs =
-      let func_metadata =
-        List.map snd (Int32Map.bindings func_metadata_map) in
-      let zipped = List.combine ast_mod.funcs func_metadata in
-      List.fold_left (fun (i, acc) (func, md) ->
+      List.fold_left (fun (i, acc) func ->
+        let md = Int32Map.find i func_metadata_map in
         let compiled_func = ir_func func_metadata_map globals func md in
         let acc = Int32Map.add i (compiled_func, md) acc in
         (Int32.(add i one), acc)
-      ) (0l, Int32Map.empty) zipped 
+      ) (0l, Int32Map.empty) ast_mod.funcs
       |> snd in
 
     (* Finally, grab the start function, if one exists *)

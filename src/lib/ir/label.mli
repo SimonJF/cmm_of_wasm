@@ -5,6 +5,7 @@ module Id : sig
   val print : Format.formatter -> t -> unit
   val reset : unit -> unit
   val is_return : t -> bool
+  val to_string : t -> string
 
   module M : Map.OrderedType with type t = t
   module Map : Map.S with type 'a t = 'a Map.Make(M).t and type key = t

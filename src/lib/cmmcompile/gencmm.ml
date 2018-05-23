@@ -83,7 +83,7 @@ let compile_binop op =
     | ShrU -> Clsr
     | Rotl -> failwith "Rotation unimplemented"
     | Rotr -> failwith "Rotation unimplemented" in
-  let compile_float_op = failwith "TODO" in
+  let compile_float_op _ = failwith "TODO" in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
@@ -150,11 +150,22 @@ let trap reason =
 let compile_terminator env = 
   let open Stackless in
   let branch b =
-    let br_id = Compile_env.lookup_label (Branch.label b) env in
+    let lbl_id = Branch.label b |> Label.id in
     let args =
       List.map (fun v ->
         Cvar (lv env v)) (Branch.arguments b) in
-    Cexit (br_id, args) in
+
+    if Label.Id.is_return lbl_id then
+      (* FIXME: Currently only supporting the return of either 0 or 1 args *)
+      begin
+        match args with
+          | [] -> Ctuple []
+          | [x] -> x
+          | _ -> failwith "Can only currently return a single argument from a function"
+      end
+    else
+      let br_id = Compile_env.lookup_label (Branch.label b) env in
+      Cexit (br_id, args) in
   function
     | Unreachable -> trap (TrapReasons.unreachable)
     | Br b -> branch b
@@ -261,8 +272,8 @@ let rec populate_symbols env (ir_module: Stackless.module_) : Compile_env.t =
   let open Libwasm.Ast in
   Util.Maps.Int32Map.fold (fun _ (_, md) acc ->
     match Func.name md with
-      | Some _name -> Compile_env.bind_global_func_symbol md env
-      | None -> Compile_env.bind_internal_func_symbol md env |> snd
+      | Some _name -> Compile_env.bind_global_func_symbol md acc
+      | None -> Compile_env.bind_internal_func_symbol md acc |> snd
   ) (ir_module.funcs) env 
 
 
