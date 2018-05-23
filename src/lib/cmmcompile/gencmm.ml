@@ -277,8 +277,18 @@ let symbol_table env : Cmm.phrase =
     |> List.map generate_cmm_symbol
     |> List.concat in
   Cdata symbs
-  
+ 
+let compile_functions env (ir_mod: Stackless.module_) =
+  let open Util.Maps in
+  Int32Map.bindings ir_mod.funcs
+  |> List.map (fun (_, (func, md)) ->
+      Cfunction (compile_function func md env))
 
 (* IR function to CMM phrase list *)
-let compile_module = failwith "TODO"
+let compile_module (ir_mod: Stackless.module_) =
+  let env = populate_symbols Compile_env.empty ir_mod in
+  let funcs = compile_functions env ir_mod in
+  let symbs = symbol_table env in
+  symbs :: funcs
+
 
