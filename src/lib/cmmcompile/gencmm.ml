@@ -20,7 +20,7 @@ let nodbg = Debuginfo.none
 let compile_value =
   let open Libwasm.Values in
   function
-  | I32 x -> Cconst_int (Int32.to_int x)
+  | I32 x -> Cconst_natint (Nativeint.of_int32 x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
   | F32 x -> failwith "32-bit floats not yet supported"
   | F64 x -> failwith "TODO" (* Cconst_float x *)
