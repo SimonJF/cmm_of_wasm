@@ -7,3 +7,6 @@ let name_to_string name =
   (* in *)
   (* String.concat "" (List.map n_to_string name) *)
   Libwasm.Utf8.encode name
+
+let internal_name name =
+  "__cmmWasm" ^ (String.capitalize_ascii name)

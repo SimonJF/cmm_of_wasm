@@ -1,6 +1,7 @@
 open Libwasm.Ast
 open Ir.Stackless
 open Cmm
+open C_stubs
 
 (* Entry point of the compiler *)
 let trace s =
@@ -49,6 +50,18 @@ let dump_stackless ir =
       print (Ir.Print_stackless.string_of_module ir)
     end
 
+let generate_c_stubs ir =
+  let open Util.Maps in
+  let funcs = Int32Map.bindings ir.funcs |> List.map (fun (_, (_, x)) -> x) in
+  let module_name =
+    Filename.remove_extension (Command_line.output_filename ()) in
+  let c_funcs = C_stubs.cfuncs_of_funcs funcs in
+  let header = C_stubs.header ~module_name ~c_funcs in
+  let stub_file = C_stubs.stub_file ~module_name ~c_funcs in
+  Printf.printf "Header: %s\n" header;
+  Printf.printf "Stub file: %s\n" stub_file
+
+
 let compile_module filename (_name_opt, module_) =
   print_module module_;
   (* Validate the module *)
@@ -59,8 +72,12 @@ let compile_module filename (_name_opt, module_) =
   (* Compile to CMM *)
   let cmm_phrases = Cmmcompile.Gencmm.compile_module ir in
   dump_cmm cmm_phrases;
+  (* Generate C stubs *)
+  generate_c_stubs ir;
   (* Compile to ASM *)
-  Build_utils.build ~name:filename ~out_dir:"." cmm_phrases
+  let out_dir = Filename.dirname filename in
+  let name = Filename.basename filename in
+  Build_utils.build ~name ~out_dir cmm_phrases
 
 let compile_modules output_filename = function
     | [] -> ()
