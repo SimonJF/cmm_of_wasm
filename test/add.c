@@ -1,6 +1,5 @@
 #include <stdio.h>
-#include "libadd.h"
-
+#include "add.h"
 
 // asm volatile ("call add" : "=a" (result) : "a" (arg1), "b" (arg2) : "memory", "cc");
 

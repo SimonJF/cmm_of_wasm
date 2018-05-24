@@ -3,8 +3,10 @@ open Ir.Stackless
 open Cmm
 
 (* Entry point of the compiler *)
-let trace = print_endline
+let trace s =
+  if Command_line.verbose () then print_endline s else ()
 
+let print = print_endline
 
 let load_wasm_script filename =
   trace ("Loading (" ^ filename ^ ")...");
@@ -30,8 +32,22 @@ let rec collect_modules commands =
       | _ -> acc) [] commands |> List.rev
 
 let print_module ast_mod =
-  let open Libwasm in
-  Print.module_ stdout !(Flags.width) ast_mod
+  if Command_line.dump_wasm () then
+    Libwasm.Print.module_ stdout !(Libwasm.Flags.width) ast_mod
+
+let dump_cmm cmm_phrases =
+  if Command_line.dump_cmm () then
+    begin
+      print "CMM Phrases: ";
+      List.iter (Printcmm.phrase Format.std_formatter) cmm_phrases
+    end
+
+let dump_stackless ir =
+  if Command_line.dump_stackless () then
+    begin
+      print "IR Module: ";
+      print (Ir.Print_stackless.string_of_module ir)
+    end
 
 let compile_module filename (_name_opt, module_) =
   print_module module_;
@@ -39,18 +55,25 @@ let compile_module filename (_name_opt, module_) =
   Libwasm.Valid.check_module module_;
   (* Generate stackless IR representation *)
   let ir = Ir.Genstackless.ir_module module_ in
-  trace "IR Module: ";
-  trace (Ir.Print_stackless.string_of_module ir);
+  dump_stackless ir;
+  (* Compile to CMM *)
   let cmm_phrases = Cmmcompile.Gencmm.compile_module ir in
-  trace "CMM Phrases: ";
-  List.iter (Printcmm.phrase Format.std_formatter) cmm_phrases;
-  trace "Time to output ASM!";
+  dump_cmm cmm_phrases;
+  (* Compile to ASM *)
   Build_utils.build ~name:filename ~out_dir:"." cmm_phrases
+
+let compile_modules output_filename = function
+    | [] -> ()
+    | [x] -> compile_module output_filename x
+    | xs ->
+      List.iteri (fun i -> compile_module (output_filename ^ (string_of_int i)) ) xs
 
 let frontend filename =
   load_wasm_script filename
   |> collect_modules
-  |> List.iteri (fun i -> compile_module (filename ^ (string_of_int i)) )
+  |> compile_modules 
+      (Filename.remove_extension 
+        (Command_line.output_filename ())) 
 
 let () =
   Command_line.setup ();
