@@ -1,5 +1,6 @@
 B ../../../_build/default/src/lib/util
 FLG -open Util -w -40
 PKG bigarray
+PKG getopt
 PKG libwasm
 PKG unix

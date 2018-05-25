@@ -48,7 +48,10 @@ let bind_global_func_symbol (md: Ir.Func.t) env =
   let name =
     match Ir.Func.name md with
       | Some name ->
-          name
+          (* Internal name if we're generating CMM; standard name if not *)
+          if Util.Command_line.generate_c () then
+            Util.Names.internal_name name
+          else name
       | _ -> failwith "Global function metadata must be named!" in
   { env with 
       func_symbols = 

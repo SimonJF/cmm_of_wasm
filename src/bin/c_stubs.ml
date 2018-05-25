@@ -134,13 +134,13 @@ let header ~module_name ~c_funcs =
     |> String.concat "\n" in
 
   let header_name =
-    Printf.sprintf "__%s_H" (String.uppercase_ascii module_name) in
+    Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii module_name) in
 
-  Printf.sprintf "#ifndef %s\n#define%s\n%s\n#endif"
-    header_name header_name header_exports
+  Printf.sprintf "#ifndef %s\n#define %s\n#include %s\n%s\n#endif"
+    header_name header_name "<stdint.h>" header_exports
 
-let stub_file ~module_name ~c_funcs =
+let stub_file ~header_filename ~c_funcs =
   let func_stubs = List.map generate_cstub c_funcs |> String.concat "\n\n" in
-  Printf.sprintf "#include %s\n#include \"%s.h\"\n\n%s\n"
-    "<stdint.h>" module_name func_stubs
+  Printf.sprintf "#include %s\n#include \"%s\"\n\n%s\n"
+    "<stdint.h>" header_filename  func_stubs
   

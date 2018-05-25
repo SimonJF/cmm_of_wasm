@@ -6,6 +6,7 @@ PKG bigarray
 PKG compiler-libs
 PKG compiler-libs.common
 PKG compiler-libs.optcomp
+PKG getopt
 PKG libwasm
 PKG unix
 S ../ir

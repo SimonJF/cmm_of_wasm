@@ -2,6 +2,7 @@ B ../../../_build/default/src/lib/ir
 B ../../../_build/default/src/lib/util
 FLG -open Ir -w -40
 PKG bigarray
+PKG getopt
 PKG libwasm
 PKG unix
 S ../util
