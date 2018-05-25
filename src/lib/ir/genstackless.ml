@@ -116,26 +116,23 @@ let ir_term env instrs =
                 let (cond, env) = Translate_env.pop env in
                 let (cont_lbl, cont) = capture_continuation tys in
 
-                let fresh_env locals =
+                let fresh_env =
                   env
                   |> Translate_env.with_stack []
-                  |> Translate_env.with_continuation cont_lbl
-                  |> Translate_env.with_locals locals in
+                  |> Translate_env.with_continuation cont_lbl in
 
                 (* For each branch, make a continuation with a fresh label,
                  * containing the instructions in the branch. *)
                 let make_branch instrs =
                   let lbl = Label.create 0 in
-                  let locals = Translate_env.locals env in
-                  let local_params = List.map Var.rename locals in
-                  let env = fresh_env local_params in
+                  let env = fresh_env in
                   let transformed = transform_instrs env [] instrs in
                   (* NOTE: We are currently creating parameters, and immediately
                    * applying the current locals as parameters in the branches!
                    * I'm confident we can optimise this, but being uniform and 
                    * careful to start... *)
-                  Branch.create lbl locals, 
-                  Cont (lbl, local_params, false, transformed) in
+                  (Branch.create lbl [], 
+                   Cont (lbl, [], false, transformed)) in
 
                 (* Make true and false branches *)
                 let branch_t, cont_t = make_branch t in

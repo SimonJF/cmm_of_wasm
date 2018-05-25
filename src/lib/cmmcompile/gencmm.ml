@@ -181,7 +181,7 @@ let compile_terminator env =
     | If { cond; ifso; ifnot } ->
         let cond_var = Cvar (lv env cond) in
         let test = 
-          Cop (Ccmpi Ceq, [cond_var; Cconst_natint Nativeint.zero],
+          Cop (Ccmpi Cne, [cond_var; Cconst_natint Nativeint.zero],
             nodbg) in
         let true_branch = branch ifso in
         let false_branch = branch ifnot in
