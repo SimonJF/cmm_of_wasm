@@ -10,6 +10,14 @@ let bind_var v env =
   let env = Compile_env.bind_var v ident env in
   (ident, env)
 
+let bind_vars vs env =
+  let (acc, env) =
+    List.fold_left (fun (acc, env) v ->
+      let (ident, env) = bind_var v env in
+      (ident :: acc, env)
+    ) ([], env) vs in
+  (List.rev acc, env)
+
 let nodbg = Debuginfo.none
 
 (* We're making the assumption here that we're on a 64-bit architecture at the moment.
@@ -225,7 +233,7 @@ let rec compile_body env terminator = function
       match x with
         | Cont (lbl, binders, is_rec, body) ->
             let rec_flag = if is_rec then Recursive else Nonrecursive in
-            let binders_idents = List.map (lv env) binders in
+            let (binders_idents, env) = bind_vars binders env in
             let (lbl_id, env) = Compile_env.bind_label lbl env in
             let catch_clause =
               (lbl_id, binders_idents, compile_term env body) in

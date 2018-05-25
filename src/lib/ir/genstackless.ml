@@ -64,7 +64,7 @@ let ir_term env instrs =
             let new_stack = arg_params @ local_params @ stack in
             let env = Translate_env.with_stack new_stack env in
             (* Codegen continuation *)
-            let term = transform_instrs env [] instrs in
+            let term = transform_instrs env [] xs in
             let cont = Cont (lbl, arg_params @ local_params, false, term) in
             (lbl, cont) in
 
