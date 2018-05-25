@@ -1,0 +1,22 @@
+(module
+  (func (export "nested") (param i32 i32) (result i32)
+    (if (result i32) (get_local 0)
+      (then
+        (if (get_local 1) (then (block) (nop)))
+        (if (get_local 1) (then) (else (block) (nop)))
+        (if (result i32) (get_local 1)
+          (then (i32.const 9))
+          (else (i32.const 10))
+        )
+      )
+      (else
+        (if (get_local 1) (then (block) (nop)))
+        (if (get_local 1) (then) (else (block) (nop)))
+        (if (result i32) (get_local 1)
+          (then (i32.const 10))
+          (else (i32.const 11))
+        )
+      )
+    )
+  )
+)
