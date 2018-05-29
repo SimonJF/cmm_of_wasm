@@ -1,5 +1,5 @@
 add :
-	../cmm_of_wasm -o libadd add.wast
+	../../cmm_of_wasm -o libadd add.wat
 	gcc -o add libadd.o add.c
 
 clean :

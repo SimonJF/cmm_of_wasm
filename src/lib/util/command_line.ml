@@ -37,7 +37,6 @@ let setup () =
     Getopt.parse_cmdline options set_filename
    with | _ -> print_syntax ()
     
-let filename () = !(Refs.filename)
 let shared () = !(Refs.shared)
 let generate_c () = !(Refs.generate_c)
 let dump_stackless () = !(Refs.dump_stackless)
@@ -46,6 +45,9 @@ let dump_linear () = !(Refs.dump_linear)
 let dump_wasm () = !(Refs.dump_wasm)
 let verbose () = !(Refs.verbose)
 let cc () = !(Refs.cc)
+
+let input_filename () = !(Refs.filename)
+
 let output_filename () =
   match !(Refs.output_filename) with 
     | Some fn -> fn

@@ -1,4 +1,3 @@
-val filename : unit -> string
 val shared : unit -> bool
 val generate_c : unit -> bool
 val setup : unit -> unit
@@ -8,4 +7,5 @@ val dump_linear : unit -> bool
 val verbose : unit -> bool
 val cc : unit -> string
 val dump_wasm : unit -> bool
+val input_filename : unit -> string
 val output_filename : unit -> string

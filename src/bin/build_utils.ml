@@ -1,6 +1,7 @@
 (* Pierre Chambart's work, repurposed for cmm_of_wasm *)
 open Libwasm
 open Util
+open Util.Trace
 
 let gen_asm out name cmm =
   Clflags.dump_cmm := Command_line.dump_cmm ();
@@ -129,19 +130,8 @@ let build ~name ~out_dir ~ir ~cmm =
   link_files [tmp_obj_filename; stub_o_filename] obj_file_name;
   write_file header_file_name header
 
-let parse_file kind name file =
-  let ic = open_in file in
-  try
-    let lexbuf = Lexing.from_channel ic in
-    let e = Parse.parse name lexbuf kind in
-    close_in ic;
-    e
-  with e ->
-    close_in ic;
-    raise e
 
-let parse_module name file =
-  let var, script = parse_file Parse.Module name file in
+let parse_module (var, script) =
   let rec depack def =
     match def.Source.it with
     | Script.Textual m -> m
@@ -162,6 +152,48 @@ let parse_module name file =
       raise e
   in
   var, modul_
+
+let parse_sexpr name file =
+  let ic = open_in file in
+  try
+    let lexbuf = Lexing.from_channel ic in
+    let e = Parse.parse name lexbuf (Parse.Module) in
+    close_in ic;
+    parse_module e
+  with e ->
+    close_in ic;
+    raise e
+
+let parse_binary name file =
+  let input_binary_file name file =
+    let open Ast in
+    let open Source in
+    trace ("Loading (" ^ file ^ ")...");
+    let ic = open_in_bin file in
+    try
+      let len = in_channel_length ic in
+      let buf = Bytes.make len '\x00' in
+      really_input ic buf 0 len;
+      trace "Decoding...";
+      let res =
+        (None, Script.Encoded (name, (Bytes.to_string buf)) @@ no_region) in
+      close_in ic;
+      res
+    with exn -> close_in ic; raise exn in
+  input_binary_file name file
+  |> parse_module
+
+let parse_file name file =
+  let unsupported _ =
+    failwith (file ^ ": unsupported file type (try .wat or .wasm)") in
+  Libwasm.Run.dispatch_file_ext
+    (parse_binary name)
+    (parse_sexpr name)
+    unsupported
+    unsupported
+    unsupported
+    file
+
 (*
 let get_start (modul: Ast.module_) =
   match modul.start with
