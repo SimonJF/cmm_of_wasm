@@ -1,7 +1,6 @@
 
 module Refs = struct
   let filename = ref ""
-  let shared = ref false
   let generate_c = ref true
   let dump_cmm = ref false
   let dump_stackless = ref false
@@ -14,8 +13,7 @@ end
 
 let options = 
   let open Getopt in
-  [ ('s', "shared", Some (fun () -> Refs.shared := true), None);
-    ('n', "nocgen", Some (fun () -> Refs.generate_c := false), None);
+  [ ('n', "nocgen", Some (fun () -> Refs.generate_c := false), None);
     (noshort, "dcmm", Some (fun () -> Refs.dump_cmm := true), None);
     (noshort, "dlinear", Some (fun () -> Refs.dump_linear := true), None);
     (noshort, "dstackless", Some (fun () -> Refs.dump_stackless := true), None);
@@ -28,7 +26,7 @@ let options =
 let set_filename fn = Refs.filename := fn
 
 let print_syntax () =
-  Printf.printf "Syntax: cmm_of_wasm [-s -n -v -o <name>] [--shared --nocgen --dstackless --dcmm --dlinear  --verbose] [--cc=CC]] filename\n";
+  Printf.printf "Syntax: cmm_of_wasm [-s -n -v -o <name>] [--nocgen --dstackless --dcmm --dlinear --verbose] [--cc=CC]] filename\n";
   exit (-1)
 
 let setup () =
@@ -37,7 +35,6 @@ let setup () =
     Getopt.parse_cmdline options set_filename
    with | _ -> print_syntax ()
     
-let shared () = !(Refs.shared)
 let generate_c () = !(Refs.generate_c)
 let dump_stackless () = !(Refs.dump_stackless)
 let dump_cmm () = !(Refs.dump_cmm)
@@ -51,4 +48,4 @@ let input_filename () = !(Refs.filename)
 let output_filename () =
   match !(Refs.output_filename) with 
     | Some fn -> fn
-    | None -> !Refs.filename
+    | None -> (Filename.chop_extension !Refs.filename) ^ ".o"

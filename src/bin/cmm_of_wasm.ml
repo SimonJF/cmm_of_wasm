@@ -38,14 +38,12 @@ let compile_module output_file (_name_opt, module_) =
   (* Compile to ASM *)
   let output_dir = Filename.dirname output_file in
   let output_base = Filename.basename output_file in
-  Build_utils.build ~name:output_base ~out_dir:output_dir ~ir ~cmm:cmm_phrases
+  Build_utils.build ~output_name:output_base ~out_dir:output_dir ~ir ~cmm:cmm_phrases
 
 let frontend filename =
   let name = Filename.basename filename in
   Build_utils.parse_file name filename
-  |> compile_module
-      (Filename.remove_extension 
-        (Command_line.output_filename ())) 
+  |> compile_module (Command_line.output_filename ())
 
 let () =
   Command_line.setup ();

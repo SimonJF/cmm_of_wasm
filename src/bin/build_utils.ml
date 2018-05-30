@@ -45,26 +45,18 @@ let link_files obj_files out_file =
       (String.concat " " obj_files) out_file in
   run_command command
 
-let build_without_c ~name ~out_dir cmm =
-  let assembly_filename = Filename.temp_file name ".s" in
+let cleanup_temp_files files = List.iter (Sys.remove) files
+
+let build_without_c ~output_name ~out_dir cmm =
+  let assembly_filename = Filename.temp_file output_name ".s" in
   let verbose = Command_line.verbose () in
-  if Command_line.shared () then
-    let obj_file = (Filename.chop_suffix assembly_filename ".s") ^ ".o" in
-    let so_file = Filename.concat out_dir (name ^ ".so") in
-    if verbose then begin
-      Printf.eprintf "@ asm: %s\n%!" assembly_filename;
-      Printf.eprintf "@ obj: %s\n%!" obj_file;
-    end;
-    gen_asm assembly_filename name cmm;
-    call_compiler ["-c"] assembly_filename obj_file;
-    shared_file [obj_file] so_file
-  else
-    let obj_file = Filename.concat out_dir (name ^ ".o") in
+  let obj_file = Filename.concat out_dir (output_name ^ ".o") in
     if verbose then begin
       Printf.eprintf "@ asm: %s\n%!" assembly_filename;
     end;
-    gen_asm assembly_filename name cmm;
-    call_compiler ["-c"] assembly_filename obj_file
+  gen_asm assembly_filename output_name cmm;
+  call_compiler ["-c"] assembly_filename output_name;
+  cleanup_temp_files [assembly_filename]
 
 let write_file (filename: string) (contents: string) =
   let oc = open_out filename in
@@ -88,21 +80,20 @@ let write_tmp_c_stubs ~header ~header_filename ~stub ~stub_filename =
   write_file stub_filename stub 
 
 (* Default: build with C stubs *)
-(* TODO: Adapt for shared object files *)
-let build ~name ~out_dir ~ir ~cmm =
+let build ~output_name ~out_dir ~ir ~cmm =
   (* Filename of generated assembly *)
-  let assembly_filename = Filename.temp_file name ".s" in
+  let assembly_filename = Filename.temp_file output_name ".s" in
   (* Filename of compiled CMM object *)
-  let tmp_obj_filename = Filename.temp_file name ".o" in
+  let tmp_obj_filename = Filename.temp_file output_name ".o" in
   (* Filename of generated C stub *)
-  let stub_c_filename = Filename.temp_file name ".c" in
+  let stub_c_filename = Filename.temp_file output_name ".c" in
   (* Filename of generated C stub object *)
-  let stub_o_filename = Filename.temp_file name ".o" in
+  let stub_o_filename = Filename.temp_file output_name ".o" in
   (* Filename of temporary C header *)
-  let stub_h_filename = Filename.temp_file name ".h" in
+  let stub_h_filename = Filename.temp_file output_name ".h" in
   let verbose = Command_line.verbose () in
-  let obj_file_name = Filename.concat out_dir (name ^ ".o") in
-  let header_file_name = Filename.concat out_dir (name ^ ".h") in
+  let obj_file_name = Filename.concat out_dir (output_name ^ ".o") in
+  let header_file_name = Filename.concat out_dir (output_name ^ ".h") in
   if verbose then begin
     Printf.eprintf "@ asm: %s\n%!" assembly_filename;
     Printf.eprintf "@ cmm o: %s\n%!" tmp_obj_filename;
@@ -124,11 +115,14 @@ let build ~name ~out_dir ~ir ~cmm =
   call_compiler ["-c"] stub_c_filename stub_o_filename;
 
   (* Generate WASM .o *)
-  gen_asm assembly_filename name cmm;
+  gen_asm assembly_filename output_name cmm;
   call_compiler ["-c"] assembly_filename tmp_obj_filename;
   (* Link stub .o and WASM .o to generate final .o file *)
   link_files [tmp_obj_filename; stub_o_filename] obj_file_name;
-  write_file header_file_name header
+  write_file header_file_name header;
+  cleanup_temp_files
+    [assembly_filename; tmp_obj_filename;
+     stub_c_filename; stub_h_filename; stub_o_filename]
 
 
 let parse_module (var, script) =

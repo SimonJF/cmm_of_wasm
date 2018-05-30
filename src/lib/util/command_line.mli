@@ -1,4 +1,3 @@
-val shared : unit -> bool
 val generate_c : unit -> bool
 val setup : unit -> unit
 val dump_stackless : unit -> bool
