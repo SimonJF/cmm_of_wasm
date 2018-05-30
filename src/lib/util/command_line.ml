@@ -9,6 +9,8 @@ module Refs = struct
   let cc = ref "cc"
   let dump_wasm = ref false
   let output_filename = ref None
+  let header_prefix_path = ref None
+  let rts_path = ref None
 end
 
 let options = 
@@ -20,7 +22,9 @@ let options =
     (noshort, "dwasm", Some (fun () -> Refs.dump_wasm := true), None);
     ('v', "verbose", Some (fun () -> Refs.verbose := true), None);
     (noshort, "cc", None, Some (fun s -> Refs.cc := s));
-    ('o', nolong, None, Some (fun s -> Refs.output_filename := (Some s)))
+    ('o', nolong, None, Some (fun s -> Refs.output_filename := (Some s)));
+    (noshort, "rts", None, Some (fun s -> Refs.rts_path := (Some s)));
+    (noshort, "header-prefix", None, Some (fun s -> Refs.header_prefix_path := (Some s)))
   ]
 
 let set_filename fn = Refs.filename := fn
@@ -48,4 +52,29 @@ let input_filename () = !(Refs.filename)
 let output_filename () =
   match !(Refs.output_filename) with 
     | Some fn -> fn
-    | None -> (Filename.chop_extension !Refs.filename) ^ ".o"
+    | None -> 
+        Filename.basename !Refs.filename
+        |> Filename.chop_extension
+
+(* Eh, it'll work for now; we'll want to do something better
+ * when we're packaging on opam later *)
+let default_includes_dir =
+  let exe_dir = Filename.dirname Sys.executable_name in
+  Filename.concat exe_dir "includes"
+
+let header_filename = "header-prefix.h"
+
+let header_prefix_path () =
+  match !Refs.header_prefix_path with
+    | Some fn -> fn
+    | None -> Filename.concat default_includes_dir header_filename
+
+let default_rts_path =
+  Filename.concat default_includes_dir "rts"
+
+let rts_path () =
+  match !Refs.rts_path with
+    | Some fn -> fn
+    | None -> default_rts_path 
+
+let rts_header () = Filename.concat (rts_path ()) "wasm-rt.h"

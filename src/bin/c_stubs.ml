@@ -1,7 +1,7 @@
 (* Generates C header files and stubs for a compiled module *)
 open Ir
 
-type c_type = | Uint32 | Uint64 | Float | Double | Void
+type c_type = | U32 | U64 | F32 | F64 | Void
 
 type cfunc = {
   external_name : string; (* External symbol name *)
@@ -13,16 +13,16 @@ type cfunc = {
 let ctype_of_wasm_type =
   let open Libwasm.Types in
   function
-  | I32Type -> Uint32
-  | I64Type -> Uint64
-  | F32Type -> Float
-  | F64Type -> Double
+  | I32Type -> U32
+  | I64Type -> U64
+  | F32Type -> F32
+  | F64Type -> F64
 
 let string_of_ctype = function
-  | Uint32 -> "uint32_t"
-  | Uint64 -> "uint64_t"
-  | Float -> "float"
-  | Double -> "double"
+  | U32 -> "u32"
+  | U64 -> "u64"
+  | F32 -> "f32"
+  | F64 -> "f64"
   | Void -> "void"
 
 let signature func =
@@ -33,10 +33,10 @@ let signature func =
   Printf.sprintf "%s %s(%s)"
     (string_of_ctype func.ret_ty) func.external_name args
 
-let cfunc_of_func' func =
+let cfunc_of_func' module_name func =
   let arg_name i = function
-    | Uint32 | Uint64 -> "i" ^ (string_of_int i)
-    | Float | Double -> "f" ^ (string_of_int i)
+    | U32 | U64 -> "i" ^ (string_of_int i)
+    | F32 | F64 -> "f" ^ (string_of_int i)
     | Void -> assert false in
   match Func.name func with
     | None -> []
@@ -56,18 +56,24 @@ let cfunc_of_func' func =
             let cty = ctype_of_wasm_type ty in
             let name = arg_name i cty in
             (name, cty)) args in
-        [{ external_name = name; 
+        let name_prefix =
+          (* First, need to sanitise the module name *)
+          let re = Str.regexp "[^a-zA-Z0-9]" in
+          let sanitised = Str.global_replace re "_"  module_name in
+          sanitised ^ "_" in
+        [{ external_name = name_prefix ^ name; 
            internal_name = Util.Names.internal_name name;
            args = c_args; ret_ty = ret }]
 
 
-let cfunc_of_func func =
-  match cfunc_of_func' func with
+let cfunc_of_func ~module_name func =
+  match cfunc_of_func' module_name func with
     | [] -> None
     | [x] -> Some x
     | _ -> assert false
 
-let cfuncs_of_funcs funcs = List.concat (List.map cfunc_of_func' funcs)
+let cfuncs_of_funcs ~module_name funcs =
+  List.concat (List.map (cfunc_of_func' module_name) funcs)
 
 let integer_register i =
   (* OCaml calling conventions, you be crazy.. *)
@@ -100,10 +106,10 @@ let generate_cstub func =
     * 3) C return of result type *)
   let rec assign_registers i_count f_count = function
     | [] -> []
-    | (name, Uint32) :: xs | (name, Uint64) :: xs ->
+    | (name, U32) :: xs | (name, U64) :: xs ->
         let reg = integer_register i_count in
         (name, reg) :: assign_registers (i_count + 1) f_count xs
-    | (name, Float) :: xs | (name, Double) :: xs ->
+    | (name, F32) :: xs | (name, F64) :: xs ->
         let reg = float_register f_count in
         (name, reg) :: assign_registers i_count (f_count + 1) xs
     | (_, Void) :: _ -> assert false in
@@ -115,8 +121,8 @@ let generate_cstub func =
   in
   let result_register =
     match func.ret_ty with
-      | Uint32 | Uint64 -> "\"=a\""
-      | Float | Double -> "\"=v0\""
+      | U32 | U64 -> "\"=a\""
+      | F32 | F64 -> "\"=v0\""
       | Void -> assert false in
   signature func ^ " {\n" ^
     (Printf.sprintf "  %s result;\n" (string_of_ctype func.ret_ty)) ^
@@ -126,6 +132,10 @@ let generate_cstub func =
     "  return result;\n}"
 
 let header ~module_name ~c_funcs =
+  let header_prefix =
+    let header_prefix_path = Util.Command_line.header_prefix_path () in
+    Util.Files.read_text_file header_prefix_path in
+
   (* TODO: This is limited to functions for now; we'll need to extend it for
    * arbitrary globals later *)
   let header_exports =
@@ -135,12 +145,16 @@ let header ~module_name ~c_funcs =
 
   let header_name =
     Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii module_name) in
+  let rts_basename = Filename.basename (Util.Command_line.rts_header ()) in
 
-  Printf.sprintf "#ifndef %s\n#define %s\n#include %s\n%s\n#endif"
-    header_name header_name "<stdint.h>" header_exports
+  "#ifndef " ^ header_name ^ "\n" ^
+  "#define " ^ header_name ^ "\n" ^
+  "#include \"" ^ rts_basename ^ "\"\n" ^
+  header_prefix ^ "\n" ^
+  header_exports ^ "\n" ^
+  "#endif"
 
 let stub_file ~header_filename ~c_funcs =
   let func_stubs = List.map generate_cstub c_funcs |> String.concat "\n\n" in
-  Printf.sprintf "#include %s\n#include \"%s\"\n\n%s\n"
-    "<stdint.h>" header_filename  func_stubs
+  Printf.sprintf "#include \"%s\"\n\n%s\n" header_filename func_stubs
   

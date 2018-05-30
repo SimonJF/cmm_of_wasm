@@ -9,6 +9,7 @@ PKG compiler-libs.common
 PKG compiler-libs.optcomp
 PKG getopt
 PKG libwasm
+PKG str
 PKG unix
 S ../lib/cmmcompile
 S ../lib/ir

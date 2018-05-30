@@ -54,8 +54,8 @@ let build_without_c ~output_name ~out_dir cmm =
     if verbose then begin
       Printf.eprintf "@ asm: %s\n%!" assembly_filename;
     end;
-  gen_asm assembly_filename output_name cmm;
-  call_compiler ["-c"] assembly_filename output_name;
+  gen_asm assembly_filename obj_file cmm;
+  call_compiler ["-c"] assembly_filename obj_file;
   cleanup_temp_files [assembly_filename]
 
 let write_file (filename: string) (contents: string) =
@@ -70,7 +70,7 @@ let generate_c_stubs ~header_filename (ir:Ir.Stackless.module_) =
     Command_line.output_filename ()
       |> Filename.basename
       |> Filename.remove_extension in
-  let c_funcs = C_stubs.cfuncs_of_funcs funcs in
+  let c_funcs = C_stubs.cfuncs_of_funcs ~module_name funcs in
   let header = C_stubs.header ~module_name ~c_funcs in
   let stub = C_stubs.stub_file ~header_filename ~c_funcs in
   (header, stub)
@@ -91,6 +91,13 @@ let build ~output_name ~out_dir ~ir ~cmm =
   let stub_o_filename = Filename.temp_file output_name ".o" in
   (* Filename of temporary C header *)
   let stub_h_filename = Filename.temp_file output_name ".h" in
+  (* Filename of temporary RTS header *)
+  let rts_header_path = Command_line.rts_header () in
+  let rts_h_basename = Filename.basename rts_header_path in
+  let rts_h_tmp_filename =
+    Filename.concat
+      (Filename.get_temp_dir_name ()) rts_h_basename in
+  Unix.symlink rts_header_path rts_h_tmp_filename;
   let verbose = Command_line.verbose () in
   let obj_file_name = Filename.concat out_dir (output_name ^ ".o") in
   let header_file_name = Filename.concat out_dir (output_name ^ ".h") in
