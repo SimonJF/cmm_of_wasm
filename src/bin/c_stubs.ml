@@ -56,11 +56,13 @@ let cfunc_of_func' module_name func =
             let cty = ctype_of_wasm_type ty in
             let name = arg_name i cty in
             (name, cty)) args in
-        let name_prefix =
-          (* First, need to sanitise the module name *)
+        (* First, need to sanitise the module name and method name *)
+        let sanitise x = 
           let re = Str.regexp "[^a-zA-Z0-9]" in
-          let sanitised = Str.global_replace re "_"  module_name in
-          sanitised ^ "_" in
+          Str.global_replace re "_"  x in
+
+        let name_prefix = (sanitise module_name) ^ "_" in
+        let name = name_prefix ^ (sanitise name) in
         [{ external_name = name_prefix ^ name; 
            internal_name = Util.Names.internal_name name;
            args = c_args; ret_ty = ret }]
@@ -119,17 +121,37 @@ let generate_cstub func =
       Printf.sprintf "\"%s\" (%s)" reg name) register_map
     |> String.concat ", " 
   in
-  let result_register =
-    match func.ret_ty with
-      | U32 | U64 -> "\"=a\""
-      | F32 | F64 -> "\"=v0\""
-      | Void -> assert false in
+
+    let result_decl = 
+    if func.ret_ty = Void then
+      ""
+    else
+      Printf.sprintf "  %s result;\n" (string_of_ctype func.ret_ty) in
+
+  let result_return =
+    if func.ret_ty = Void then
+      "return;\n"
+    else
+      "return result;\n" in
+
+  let result_assignment = 
+    if func.ret_ty = Void then
+      ""
+    else
+      let result_register =
+        match func.ret_ty with
+          | U32 | U64 -> "\"=a\""
+          | F32 | F64 -> "\"=v0\""
+          | Void -> assert false in
+      Printf.sprintf "%s (result)" result_register in
+
+
   signature func ^ " {\n" ^
-    (Printf.sprintf "  %s result;\n" (string_of_ctype func.ret_ty)) ^
-    (Printf.sprintf "  asm volatile(\"call %s\" : %s (result) : "
-      (func.internal_name) result_register) ^
+    result_decl ^
+    (Printf.sprintf "  asm volatile(\"call %s\" : %s : "
+      (func.internal_name) result_assignment) ^
     formatted_register_map ^ " : \"memory\", \"cc\");\n" ^
-    "  return result;\n}"
+    result_return ^ "}"
 
 let header ~module_name ~c_funcs =
   let header_prefix =

@@ -26,6 +26,8 @@ let dump_stackless ir =
     end
 
 let compile_module output_file (_name_opt, module_) =
+  (* FIXME: currently this will break if output_file contains invalid characters *)
+  (* FIXME: need to namespace internal function symbols *)
   print_module module_;
   (* Validate the module *)
   Libwasm.Valid.check_module module_;
@@ -33,12 +35,16 @@ let compile_module output_file (_name_opt, module_) =
   let ir = Ir.Genstackless.ir_module module_ in
   dump_stackless ir;
   (* Compile to CMM *)
-  let cmm_phrases = Cmmcompile.Gencmm.compile_module ir in
+  let cmm_phrases = Cmmcompile.Gencmm.compile_module output_file ir in
   dump_cmm cmm_phrases;
   (* Compile to ASM *)
   let output_dir = Filename.dirname output_file in
   let output_base = Filename.basename output_file in
-  Build_utils.build ~output_name:output_base ~out_dir:output_dir ~ir ~cmm:cmm_phrases
+  Build_utils.build
+    ~output_name:output_base
+    ~out_dir:output_dir
+    ~ir
+    ~cmm:cmm_phrases
 
 let frontend filename =
   let name = Filename.basename filename in

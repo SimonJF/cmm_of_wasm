@@ -4,7 +4,7 @@ type t = {
   stack : Var.t list;
   block_continuation: Label.t;
   function_return: Label.t;
-  locals: Var.t list;
+  locals: Var.t Int32Map.t;
   label_stack: Label.t list;
   globals: (Stackless.global * Global.t) Int32Map.t;
   functions: Func.t Int32Map.t
@@ -30,19 +30,11 @@ let push_label lbl env = {
   env with label_stack = lbl :: env.label_stack
 }
 
-(* TODO: These are inefficient as lists -- immutable
- * arrays would be a lot better. Maybe maps? *)
 let set_local (var: Libwasm.Ast.var) value env =
-  let rec go n = function
-    | [] -> failwith "FATAL: set_local -- not enough variables"
-    | x :: xs ->
-        if (n = Int32.zero) then value :: xs
-        else x :: (go (Int32.sub n 1l) xs) in
-  let xs = go var.it env.locals in
-  { env with locals = xs }
+  { env with locals = Int32Map.add (var.it) value (env.locals) }
 
 let get_local (var: Libwasm.Ast.var) env =
-  Libwasm.Lib.List32.nth env.locals var.it
+  Int32Map.find (var.it) env.locals
 
 let push x env = { env with stack = x :: (env.stack) }
 
@@ -72,8 +64,19 @@ let popn n env =
   popped, { env with stack = rest }
 
 let with_stack stack env = { env with stack }
-let locals env = env.locals
-let with_locals locals env = { env with locals }
+
+let locals env =
+  Int32Map.bindings env.locals
+  |> List.map snd
+
+let with_locals locals env =
+  let (_, new_locals) =
+  List.fold_left (fun (i, acc) v ->
+    let acc = Int32Map.add i v acc in
+    (Int32.(add i one), acc)
+  ) (Int32.zero, Int32Map.empty) locals in
+  { env with locals = new_locals}
+
 let get_global (var: Libwasm.Ast.var) env =
   Int32Map.find (var.it) env.globals |> snd
 

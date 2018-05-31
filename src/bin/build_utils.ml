@@ -97,7 +97,9 @@ let build ~output_name ~out_dir ~ir ~cmm =
   let rts_h_tmp_filename =
     Filename.concat
       (Filename.get_temp_dir_name ()) rts_h_basename in
-  Unix.symlink rts_header_path rts_h_tmp_filename;
+  try
+    Unix.symlink rts_header_path rts_h_tmp_filename
+  with _ -> ();
   let verbose = Command_line.verbose () in
   let obj_file_name = Filename.concat out_dir (output_name ^ ".o") in
   let header_file_name = Filename.concat out_dir (output_name ^ ".h") in

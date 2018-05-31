@@ -129,10 +129,6 @@ let ir_term env instrs =
                   let lbl = Label.create 0 in
                   let env = fresh_env lbl in
                   let transformed = transform_instrs env [] instrs in
-                  (* NOTE: We are currently creating parameters, and immediately
-                   * applying the current locals as parameters in the branches!
-                   * I'm confident we can optimise this, but being uniform and 
-                   * careful to start... *)
                   (Branch.create lbl [], 
                    Cont (lbl, [], false, transformed)) in
 
@@ -173,8 +169,8 @@ let ir_term env instrs =
                   Stackless.BrTable { index; es = branches; default } in
                 terminate generated brtable_term
             | Return ->
-                (* NOTE: I don't *think* we need to do anything with
-                 * locals here as locals can't escape a function... *)
+                (* NOTE: We don't need to do anything with
+                 * locals here as locals can't escape a function. *)
                 let arity =
                   Translate_env.continuation env
                   |> Label.arity in
@@ -184,7 +180,6 @@ let ir_term env instrs =
                 terminate generated (Stackless.Br branch)
             | Call var ->
                 let open Libwasm.Types in
-                (* TODO: I don't think we need to do locals here? *)
                 let func = Translate_env.get_function var env in
                 let FuncType (arg_tys, ret_tys) = Func.type_ func in
                 (* Capture current continuation *)
@@ -254,6 +249,26 @@ let ir_term env instrs =
           end in
       transform_instrs env [] instrs
 
+let bind_locals env params locals =
+  let var i = Libwasm.Source.(i @@ no_region) in
+  (* Firstly, add locals entries for parameters, mapping to the parameter names. *)
+  let (i, env) =
+    List.fold_left (fun (i, env) arg_v ->
+      (Int32.(add i one), Translate_env.set_local (var i) arg_v env)
+    ) (Int32.zero, env) params in
+
+  (* Finally, add locals entries for locals, let-bind them to default values,
+   * and bind them to the fresh variable names. *)
+  let (_, instrs_rev, env) =
+    List.fold_left (fun (i, instrs, env) ty ->
+      let v = Var.create ty in
+      let x = Stackless.Const (Libwasm.Values.default_value ty) in
+      let env = Translate_env.set_local (var i) v env in
+      let instr = Let (v, x) in
+      (Int32.(add i one), instr :: instrs, env)
+    ) (i, [], env) locals in
+  ((List.rev instrs_rev), env) 
+
 let ir_func
     (functions: Func.t Util.Maps.Int32Map.t)
     (globs: (Stackless.global * Global.t) Util.Maps.Int32Map.t)
@@ -261,31 +276,36 @@ let ir_func
     (func_metadata: Func.t) =
   let open Libwasm.Types in
   let func = ast_func.it in
-  let locals = func.locals in
   let (FuncType (arg_tys, ret_tys)) as fty =
     Func.type_ func_metadata in
+  (* Create parameter names for each argument type *)
   let arg_params = List.map (Var.create) arg_tys in
-  let local_params = List.map (Var.create) locals in
-  let params = arg_params @ local_params in
-  let arity = List.length ret_tys in
 
+  (* Create return label *)
+  let arity = List.length ret_tys in
   let ret = Label.create_return arity in
-  let env =
+
+  (* Create initial environment with empty stack and locals. *)
+  let env : Translate_env.t =
     Translate_env.create
       ~stack:[]
       ~continuation:ret
       ~return:ret
       ~label_stack:[ret]
-      ~locals:params
+      ~locals:Util.Maps.Int32Map.empty
       ~globals:globs
       ~functions:functions in
 
-  let body = ir_term env func.body in
+  (* Populate locals, and set them to their default values. *)
+  let locals = func.locals in
+  let (let_bindings, env) = bind_locals env arg_params locals in
+  let fn_body = ir_term env func.body in
+  let fn_body = { fn_body with body = let_bindings @ fn_body.body } in
   {
     return = ret;
     type_ = fty;
-    params;
-    body;
+    params = arg_params;
+    body = fn_body;
   }
 
 let ir_module (ast_mod: Libwasm.Ast.module_) =

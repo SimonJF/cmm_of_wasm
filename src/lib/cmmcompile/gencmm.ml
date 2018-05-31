@@ -30,8 +30,9 @@ let compile_value =
   function
   | I32 x -> Cconst_natint (Nativeint.of_int32 x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
-  | F32 x -> failwith "32-bit floats not yet supported"
-  | F64 x -> failwith "TODO" (* Cconst_float x *)
+  (* TODO: Float support *)
+  | F32 x -> Cconst_natint (Int64.to_nativeint 0L)
+  | F64 x -> Cconst_natint (Int64.to_nativeint 0L)
  
 let compile_relop =
   let open Libwasm.Ast in
@@ -62,10 +63,10 @@ let compile_relop =
     function
       | I32 i32op -> Ccmpi (compile_int_op i32op)
       | I64 i64op -> Ccmpi (compile_int_op i64op)
+      | F32 f32op -> Ccmpf (compile_float_op f32op)(*  failwith "F32s not supported yet" *)
       | F64 f64op -> Ccmpf (compile_float_op f64op)
-      | _ -> failwith "F32s not supported yet"
 
-let compile_unop _ = failwith "TODO: I have no idea what any of these mean yet"
+let compile_unop _ = failwith "TODO"
 let compile_binop op = 
   let open Libwasm.Ast in
   let open Libwasm.Values in
@@ -89,9 +90,12 @@ let compile_binop op =
     | Shl -> Clsl
     | ShrS -> Clsr
     | ShrU -> Clsr
-    | Rotl -> failwith "Rotation unimplemented"
-    | Rotr -> failwith "Rotation unimplemented" in
-  let compile_float_op _ = failwith "TODO" in
+    (* TODO: implement rotation *)
+    | Rotl -> Clsl
+    | Rotr -> Clsl in
+  let compile_float_op _ =
+    (* FIXME: Just here to get things going to start off with... *)
+    Caddf in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
@@ -111,14 +115,15 @@ let compile_type : Libwasm.Types.value_type -> machtype =
 
 
 let compile_expression env =
+  let unimplemented = Ctuple [] in
   let open Ir.Stackless in
   function
   | Select { cond ; ifso ; ifnot } ->
       Cifthenelse (Cvar (lv env cond), Cvar(lv env ifso), Cvar(lv env ifnot))
-  | GetGlobal _ -> failwith "TODO"
-  | Load (loadop, v) -> failwith "TODO"
-  | MemorySize -> failwith "TODO" (* TODO: write RTS, hook in here *)
-  | MemoryGrow v -> failwith "TODO"
+  | GetGlobal _ -> unimplemented
+  | Load (loadop, v) -> unimplemented
+  | MemorySize -> unimplemented
+  | MemoryGrow v -> unimplemented
   | Const value -> compile_value value
   | Test (test, v) ->
       let i = lv env v in
@@ -135,8 +140,12 @@ let compile_expression env =
       let (i1, i2) = (lv env v1, lv env v2) in
       Cop (op, [Cvar i1; Cvar i2], nodbg)
   | Unary (un, v) ->
+      (* FIXME: Edited so that we can get something compiling,
+       * fill this in later.
       let op = compile_unop un in
       Cop (op, [Cvar (lv env v)], nodbg)
+      *)
+      Cvar (lv env v)
   | Binary (bin, v1, v2) ->
       let op = compile_binop bin in
       let (i1, i2) = (lv env v1, lv env v2) in
@@ -177,7 +186,9 @@ let compile_terminator env =
   function
     | Unreachable -> trap (TrapReasons.unreachable)
     | Br b -> branch b
-    | BrTable { index ; es ; default } -> failwith "TODO"
+    | BrTable { index ; es ; default } -> 
+        (* TODO: implement *)
+        branch default
     | If { cond; ifso; ifnot } ->
         let cond_var = Cvar (lv env cond) in
         let test = 
@@ -222,7 +233,9 @@ let compile_terminator env =
                 failwith ("Can't currently compile functions with " 
                   ^ "more than one return type")
         end
-    | CallIndirect { type_; func; args; cont } -> failwith "TODO"
+    | CallIndirect { type_; func; args; cont } ->
+        (* TODO: implement *)
+        Ctuple []
 
 (* compile_body: env -> W.terminator -> W.statement list -> Cmm.expression *) 
 let rec compile_body env terminator = function
@@ -243,7 +256,9 @@ let rec compile_body env terminator = function
             let (ident, env) = bind_var v env in
             let e1 = compile_expression env e in
             Clet (ident, e1, compile_body env terminator xs)
-        | Effect eff -> failwith "TODO"
+        | Effect eff ->
+            (* FIXME: Implement this *)
+            compile_body env terminator xs
       end
 and compile_term env term = compile_body env (term.terminator) (term.body)
 
@@ -284,29 +299,39 @@ let rec populate_symbols env (ir_module: Stackless.module_) : Compile_env.t =
       | None -> Compile_env.bind_internal_func_symbol md acc |> snd
   ) (ir_module.funcs) env 
 
-
-(* Not sure whether this is even what we want... *)
-let symbol_table env : Cmm.phrase =
-  let open Symbol in
-  let generate_cmm_symbol = function
-    | Exported_symbol s -> [Cglobal_symbol s; Cdefine_symbol s]
-    | Internal_symbol s -> [Cdefine_symbol s] in
-  let symbs =
-    Compile_env.symbols env
-    |> List.map generate_cmm_symbol
-    |> List.concat in
-  Cdata symbs
- 
 let compile_functions env (ir_mod: Stackless.module_) =
   let open Util.Maps in
   Int32Map.bindings ir_mod.funcs
   |> List.map (fun (_, (func, md)) ->
       Cfunction (compile_function func md env))
 
+(* TODO: Will need to extend this to properly register functions / globals /
+ * memories with the RTS when we get to that point.
+ * For now, the init function just calls the start method if one is defined. *)
+let init_function name env (ir_mod: Stackless.module_) =
+  let body =
+    match ir_mod.start with
+      | Some md ->
+          let symbol_name =
+            Compile_env.lookup_func_symbol md env 
+            |> Symbol.name in
+          let fn_symbol = Cconst_symbol symbol_name in
+          Cop (Capply typ_void, [fn_symbol], nodbg)
+      | _ -> Ctuple [] in
+  Cfunction {
+    fun_name = name ^ "_init";
+    fun_args = [];
+    fun_body = body;
+    fun_codegen_options = [No_CSE];
+    fun_dbg = nodbg
+  }
+
+
 (* IR function to CMM phrase list *)
-let compile_module (ir_mod: Stackless.module_) =
+let compile_module name (ir_mod: Stackless.module_) =
   let env = populate_symbols Compile_env.empty ir_mod in
-  let funcs = compile_functions env ir_mod in
+  let init = init_function name env ir_mod in
+  let funcs = compile_functions env ir_mod @ [init] in
   funcs
   (* I think the symbols are exported anyway? *)
   (*

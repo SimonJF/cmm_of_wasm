@@ -4,7 +4,7 @@ val create :
   stack:Var.t list ->
   continuation:Label.t ->
   return:Label.t ->
-  locals:Var.t list ->
+  locals:Var.t Util.Maps.Int32Map.t ->
   label_stack:Label.t list ->
   globals:(Stackless.global * Global.t) Util.Maps.Int32Map.t ->
   functions:Func.t Util.Maps.Int32Map.t ->
