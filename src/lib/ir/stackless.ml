@@ -63,3 +63,7 @@ type module_ = {
     (* TODO: Fill the rest of this in *)
     exports : Libwasm.Ast.export list
 }
+
+let lookup_function (ir_mod: module_) (v: Libwasm.Ast.var) =
+  let key = v.it in
+  Util.Maps.Int32Map.find key ir_mod.funcs
