@@ -14,12 +14,12 @@ let print ppf t =
 let is_named t name =
   match t.name with
   | None -> false
-  | Some tname -> name_to_string tname = name
+  | Some tname -> sanitise (name_to_string tname) = sanitise name
 
 let name t =
   match t.name with
   | None -> None
-  | Some name -> Some (name_to_string name)
+  | Some name -> Some (sanitise (name_to_string name))
 
 let type_ f = f.ty
 

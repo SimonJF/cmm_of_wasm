@@ -31,8 +31,8 @@ let compile_value =
   | I32 x -> Cconst_natint (Nativeint.of_int32 x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
   (* TODO: Float support *)
-  | F32 x -> Cconst_natint (Int64.to_nativeint 0L)
-  | F64 x -> Cconst_natint (Int64.to_nativeint 0L)
+  | F32 x -> Cconst_float 0.0
+  | F64 x -> Cconst_float 0.0
  
 let compile_relop =
   let open Libwasm.Ast in

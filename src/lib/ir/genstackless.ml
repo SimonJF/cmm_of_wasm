@@ -61,8 +61,10 @@ let ir_term env instrs =
             let local_params = List.map Var.rename (Translate_env.locals env) in
             (* Push parameters onto to virtual stack *)
             let stack = Translate_env.stack env in
-            let new_stack = arg_params @ local_params @ stack in
-            let env = Translate_env.with_stack new_stack env in
+            let new_stack = arg_params @ stack in
+            let env =
+              Translate_env.with_stack new_stack env
+              |> Translate_env.with_locals local_params in
             (* Codegen continuation *)
             let term = transform_instrs env [] xs in
             let cont = Cont (lbl, arg_params @ local_params, false, term) in

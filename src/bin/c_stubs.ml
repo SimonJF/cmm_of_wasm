@@ -57,12 +57,8 @@ let cfunc_of_func' module_name func =
             let name = arg_name i cty in
             (name, cty)) args in
         (* First, need to sanitise the module name and method name *)
-        let sanitise x = 
-          let re = Str.regexp "[^a-zA-Z0-9]" in
-          Str.global_replace re "_"  x in
-
-        let name_prefix = (sanitise module_name) ^ "_" in
-        let name = name_prefix ^ (sanitise name) in
+        let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
+        let name = name_prefix ^ name in
         [{ external_name = name_prefix ^ name; 
            internal_name = Util.Names.internal_name name;
            args = c_args; ret_ty = ret }]
