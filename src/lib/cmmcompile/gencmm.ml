@@ -28,7 +28,7 @@ let nodbg = Debuginfo.none
 let compile_value =
   let open Libwasm.Values in
   function
-  | I32 x -> Cconst_natint (Nativeint.of_int32 x)
+  | I32 x -> Cconst_int (Int32.to_int x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
   (* TODO: Float support *)
   | F32 x -> Cconst_float 0.0
@@ -246,10 +246,17 @@ let rec compile_body env terminator = function
       match x with
         | Cont (lbl, binders, is_rec, body) ->
             let rec_flag = if is_rec then Recursive else Nonrecursive in
-            let (binders_idents, env) = bind_vars binders env in
+            (* Bind vars, and build up (ident, machtype) pairs *)
+            let (idents_rev, env) =
+              List.fold_left (fun (acc, env) v ->
+                let (ident, env) = bind_var v env in
+                let mty = compile_type (Var.type_ v) in
+                ((ident, mty) :: acc, env)
+              ) ([], env) binders in
+            let idents = List.rev idents_rev in
             let (lbl_id, env) = Compile_env.bind_label lbl env in
             let catch_clause =
-              (lbl_id, binders_idents, compile_term env body) in
+              (lbl_id, idents, compile_term env body) in
             let cont = compile_body env terminator xs in
             Ccatch (rec_flag, [catch_clause], cont)
         | Let (v, e) ->

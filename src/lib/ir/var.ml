@@ -8,7 +8,7 @@ let rename (_, typ) = create typ
 let type_ (_, typ) = typ
 let print ppf (t, _) = Format.fprintf ppf "v%i" t
 let reset () = count := -1
-let to_string (id, _) = Format.sprintf "v%i" id
+let to_string (id, ty) = Format.sprintf "v%i:%s" id (Types.string_of_value_type ty)
 
 module M = struct
     type nonrec t = t

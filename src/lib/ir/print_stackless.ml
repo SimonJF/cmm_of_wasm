@@ -23,22 +23,24 @@ let sexpr_of_effect e =
 
 
 let rec sexpr_of_term (term: Stackless.term) =
-  let body = Node ("body", list sexpr_of_statement term.body) in
-  let terminator = Node ("terminator", [sexpr_of_terminator term.terminator]) in
-  Node ("term", [body; terminator])
+  let body = list sexpr_of_statement term.body in
+  let terminator = [sexpr_of_terminator term.terminator] in
+  Node ("term", body @ terminator)
 
 and sexpr_of_statement stmt =
   let head, inner =
   let open Stackless in
     match stmt with
       | Cont (lbl, binders, is_rec, term) ->
-          "cont ",
-            [Label.to_sexpr lbl;
-             Atom (concat_args binders ^ " . ");
-             Atom (if is_rec then "rec" else "not-rec");
-             sexpr_of_term term]
+          let txt =
+            Printf.sprintf "%s(%s) %s "
+              (Label.to_string lbl)
+              (concat_args binders)
+              (if is_rec then "rec" else "") in
+          txt,
+            [sexpr_of_term term]
       | Let (v, e) ->
-          "let " ^ (Var.to_string v) ^ " = ", [sexpr_of_expr e]
+          "let " ^ (Var.to_string v) ^ "=", [sexpr_of_expr e]
       | Effect e -> "effect", [sexpr_of_effect e] in
   Node (head, inner)
 

@@ -31,8 +31,8 @@ let to_sexpr x =
           [Atom ("name " ^ name)]
       | None -> [] in
   Node ("fn ", name @ [
-    Atom ("id " ^ string_of_int x.id);
-    Atom ("ty " ^ Libwasm.Types.string_of_func_type x.ty)
+    Atom (string_of_int x.id);
+    Atom (Libwasm.Types.string_of_func_type x.ty)
   ])
 
 module M = struct

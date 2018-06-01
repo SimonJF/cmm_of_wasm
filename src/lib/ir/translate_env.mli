@@ -19,6 +19,7 @@ val push : Var.t -> t -> t
 val pop : t -> (Var.t * t)
 val pop2 : t -> ((Var.t * Var.t) * t)
 val popn : int -> t -> (Var.t list * t)
+val popn_rev : int -> t -> (Var.t list * t)
 val with_stack : Var.t list -> t -> t
 
 (* Control stack *)
@@ -37,3 +38,6 @@ val get_global : Libwasm.Ast.var -> t -> Global.t
 (* Functions *)
 val get_function : Libwasm.Ast.var -> t -> Func.t
 val with_continuation : Label.t -> t -> t
+
+(* Debugging *)
+val dump_stack : t -> unit

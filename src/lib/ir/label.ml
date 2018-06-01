@@ -45,7 +45,8 @@ let create_return ~arity = {
 let id lbl = lbl.id
 let arity lbl = lbl.arity
 
-let to_sexpr x =
-  Libwasm.Sexpr.Atom ("lbl " ^ (Id.to_string x.id) ^ ": " ^
-    (string_of_int x.arity))
+let to_string x =
+  Printf.sprintf "%s(%d)" (Id.to_string x.id) x.arity
 
+let to_sexpr x =
+  Libwasm.Sexpr.Atom (to_string x)

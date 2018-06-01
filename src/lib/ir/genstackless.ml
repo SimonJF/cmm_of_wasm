@@ -15,7 +15,7 @@ let ir_term env instrs =
     let label_and_args env (n: int32 phrase) =
       let lbl = Translate_env.nth_label (Int32.to_int n.it) env in
       let arity = Label.arity lbl in
-      let (args, _) = Translate_env.popn arity env in
+      let (args, _) = Translate_env.popn_rev arity env in
       (lbl, args) in
 
     (* Main *)
@@ -28,7 +28,7 @@ let ir_term env instrs =
           (* Need: term *)
           let cont_label = (Translate_env.continuation env) in
           let arity = Label.arity cont_label in
-          let (returned, _) = Translate_env.popn arity env in
+          let (returned, _) = Translate_env.popn_rev arity env in
           let locals = Translate_env.locals env in
           (* Function return doesn't need locals  *)
           let args =
@@ -52,7 +52,7 @@ let ir_term env instrs =
             transform_instrs env generated xs in
 
           (* Capturing a continuation *)
-          let capture_continuation parameter_tys require_locals =
+          let capture_continuation env parameter_tys require_locals =
             let lbl = Label.create (List.length parameter_tys) in
             (* Create parameters for each argument type required by continuation. *)
             let arg_params = List.map Var.create parameter_tys in
@@ -92,7 +92,7 @@ let ir_term env instrs =
                   (Var.type_ ifso)
             | Block (tys, is) ->
                 (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation tys true in
+                let (cont_lbl, cont) = capture_continuation env tys true in
                 (* Codegen block, with return set to captured continuation, and push label *)
                 let lbl = Label.create ~arity:(List.length tys) in
                 let env =
@@ -103,7 +103,7 @@ let ir_term env instrs =
                 transform_instrs env (cont :: generated) is
             | Loop (tys, is) ->
                 (* Loop: Capture current continuation. Generate loop continuation. *)
-                let (cont_lbl, cont) = capture_continuation tys true in
+                let (cont_lbl, cont) = capture_continuation env tys true in
 
                 (* Loop continuation creation *)
                 let loop_lbl = Label.create 0 in
@@ -123,7 +123,7 @@ let ir_term env instrs =
             | If (tys, t, f) ->
                 (* Pop condition *)
                 let (cond, env) = Translate_env.pop env in
-                let (cont_lbl, cont) = capture_continuation tys true in
+                let (cont_lbl, cont) = capture_continuation env tys true in
 
                 let fresh_env lbl =
                   env
@@ -148,7 +148,7 @@ let ir_term env instrs =
                 let if_term =
                   Stackless.If { cond; ifso = branch_t; ifnot = branch_f } in
                 (* Finally put the generated continuations on the stack and terminate *)
-                terminate (cont_t :: cont_f :: cont :: generated) if_term
+                terminate (cont_f :: cont_t :: cont :: generated) if_term
             | Br nesting ->
                 let (lbl, args) = label_and_args env nesting in
                 let branch = Branch.create lbl args in
@@ -156,7 +156,7 @@ let ir_term env instrs =
             | BrIf nesting ->
                 let (cond, env) = Translate_env.pop env in
                 (* If condition is true, branch, otherwise continue *)
-                let (cont_lbl, cont) = capture_continuation [] true in
+                let (cont_lbl, cont) = capture_continuation env [] true in
                 let (lbl, args) = label_and_args env nesting in
                 let br_branch = Branch.create lbl args in
                 let cont_branch = Branch.create cont_lbl [] in
@@ -182,7 +182,7 @@ let ir_term env instrs =
                 let arity =
                   Translate_env.continuation env
                   |> Label.arity in
-                let (returned, env) = Translate_env.popn arity env in
+                let (returned, env) = Translate_env.popn_rev arity env in
                 let function_return = Translate_env.return env in
                 let branch = Branch.create function_return returned in
                 terminate generated (Stackless.Br branch)
@@ -190,14 +190,13 @@ let ir_term env instrs =
                 let open Libwasm.Types in
                 let func = Translate_env.get_function var env in
                 let FuncType (arg_tys, ret_tys) = Func.type_ func in
+                (* TODO: Optimise for empty continuations, taking into account
+                 * logic in "[]" case *)
                 (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation ret_tys false in
-
+                let (cont_lbl, cont) = capture_continuation env ret_tys false in
                 (* Grab args to the function *)
-                let (args, env) = Translate_env.popn (List.length arg_tys) env in
-                (* Create variables we put returned values from called function into *)
-                let return_vars = List.map Var.create ret_tys in
-                let cont_branch = Branch.create cont_lbl args in
+                let (args, env) = Translate_env.popn_rev (List.length arg_tys) env in
+                let cont_branch = Branch.create cont_lbl [] in
                 (* Terminate *)
                 terminate (cont :: generated) (Stackless.Call {
                   func; args; cont = cont_branch
@@ -240,19 +239,21 @@ let ir_term env instrs =
                 bind env (Stackless.Const lit) ty
             | Test testop ->
                 let (v, env) = Translate_env.pop env in
-                bind env (Stackless.Test (testop, v)) (Var.type_ v)
+                bind env (Stackless.Test (testop, v)) Libwasm.Types.I32Type
             | Compare relop ->
                 let (v2, v1), env = Translate_env.pop2 env in
                 let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
-                (* TODO: This fails let _ = assert (v1ty = v2ty) in *)
-                bind env (Stackless.Compare (relop, v1, v2)) v1ty
+                let _ = Translate_env.dump_stack env in
+                let _ = assert (v1ty = v2ty) in
+                bind env (Stackless.Compare (relop, v1, v2)) Libwasm.Types.I32Type
             | Unary unop ->
                 let (v, env) = Translate_env.pop env in
                 bind env (Stackless.Unary (unop, v)) (Var.type_ v)
             | Binary binop ->
                 let (v2, v1), env = Translate_env.pop2 env in
                 let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
-                (* TODO: this fails let _ = assert (v1ty = v2ty) in *)
+                let _ = Translate_env.dump_stack env in
+                let _ = assert (v1ty = v2ty) in
                 bind env (Stackless.Binary (binop, v1, v2)) v1ty
             | Convert cvtop ->
                 let (v, env) = Translate_env.pop env in

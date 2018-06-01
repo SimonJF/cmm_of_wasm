@@ -4,12 +4,10 @@ open Util
 open Util.Trace
 
 let gen_asm out name cmm =
-  Clflags.dump_cmm := Command_line.dump_cmm ();
   Clflags.dump_linear := Command_line.dump_linear ();
   Emitaux.create_asm_file := true;
   Emitaux.output_channel := open_out out;
-  Compilenv.reset
-    ?packname:None name;
+  Compilenv.reset ?packname:None name;
   Emit.begin_assembly ();
   List.iter (Asmgen.compile_phrase Format.std_formatter) cmm;
   Emit.end_assembly ();

@@ -63,7 +63,17 @@ let popn n env =
   let (popped, rest) = go n env.stack in
   popped, { env with stack = rest }
 
+let popn_rev n env =
+  let (args_rev, env) = popn n env in
+  (List.rev args_rev, env)
+
 let with_stack stack env = { env with stack }
+
+
+let dump_stack env =
+  List.map (Var.to_string) env.stack
+  |> String.concat " :: "
+  |> print_endline
 
 let locals env =
   Int32Map.bindings env.locals
