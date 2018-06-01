@@ -52,19 +52,25 @@ let ir_term env instrs =
             transform_instrs env generated xs in
 
           (* Capturing a continuation *)
-          let capture_continuation parameter_tys =
+          let capture_continuation parameter_tys require_locals =
             let lbl = Label.create (List.length parameter_tys) in
             (* Create parameters for each argument type required by continuation. *)
             let arg_params = List.map Var.create parameter_tys in
-            (* All continuations take the required parameters, followed
-             * by the local variables (as required by SSA) *)
-            let local_params = List.map Var.rename (Translate_env.locals env) in
+            (* All continuations take the required parameters.
+             * Some require the local parameters for SSA form as well.
+             * Calls don't, as calls do not change locals, but blocks may. *)
+            let local_params =
+              if require_locals then
+                List.map Var.rename (Translate_env.locals env)
+              else [] in
             (* Push parameters onto to virtual stack *)
             let stack = Translate_env.stack env in
             let new_stack = arg_params @ stack in
             let env =
-              Translate_env.with_stack new_stack env
-              |> Translate_env.with_locals local_params in
+              let base_env = Translate_env.with_stack new_stack env in
+              if require_locals then
+                Translate_env.with_locals local_params base_env
+              else base_env in
             (* Codegen continuation *)
             let term = transform_instrs env [] xs in
             let cont = Cont (lbl, arg_params @ local_params, false, term) in
@@ -86,7 +92,7 @@ let ir_term env instrs =
                   (Var.type_ ifso)
             | Block (tys, is) ->
                 (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation tys in
+                let (cont_lbl, cont) = capture_continuation tys true in
                 (* Codegen block, with return set to captured continuation, and push label *)
                 let lbl = Label.create ~arity:(List.length tys) in
                 let env =
@@ -97,7 +103,7 @@ let ir_term env instrs =
                 transform_instrs env (cont :: generated) is
             | Loop (tys, is) ->
                 (* Loop: Capture current continuation. Generate loop continuation. *)
-                let (cont_lbl, cont) = capture_continuation tys in
+                let (cont_lbl, cont) = capture_continuation tys true in
 
                 (* Loop continuation creation *)
                 let loop_lbl = Label.create 0 in
@@ -117,7 +123,7 @@ let ir_term env instrs =
             | If (tys, t, f) ->
                 (* Pop condition *)
                 let (cond, env) = Translate_env.pop env in
-                let (cont_lbl, cont) = capture_continuation tys in
+                let (cont_lbl, cont) = capture_continuation tys true in
 
                 let fresh_env lbl =
                   env
@@ -150,7 +156,7 @@ let ir_term env instrs =
             | BrIf nesting ->
                 let (cond, env) = Translate_env.pop env in
                 (* If condition is true, branch, otherwise continue *)
-                let (cont_lbl, cont) = capture_continuation [] in
+                let (cont_lbl, cont) = capture_continuation [] true in
                 let (lbl, args) = label_and_args env nesting in
                 let br_branch = Branch.create lbl args in
                 let cont_branch = Branch.create cont_lbl [] in
@@ -185,9 +191,12 @@ let ir_term env instrs =
                 let func = Translate_env.get_function var env in
                 let FuncType (arg_tys, ret_tys) = Func.type_ func in
                 (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation ret_tys in
+                let (cont_lbl, cont) = capture_continuation ret_tys false in
+
                 (* Grab args to the function *)
                 let (args, env) = Translate_env.popn (List.length arg_tys) env in
+                (* Create variables we put returned values from called function into *)
+                let return_vars = List.map Var.create ret_tys in
                 let cont_branch = Branch.create cont_lbl args in
                 (* Terminate *)
                 terminate (cont :: generated) (Stackless.Call {
