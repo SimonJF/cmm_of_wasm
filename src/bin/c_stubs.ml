@@ -27,7 +27,7 @@ let string_of_ctype = function
 
 let signature func =
   let args =
-    List.map (fun (n, ty) -> 
+    List.map (fun (n, ty) ->
       Printf.sprintf "%s %s" (string_of_ctype ty) n) func.args
     |> String.concat ", " in
   Printf.sprintf "%s %s(%s)"
@@ -40,7 +40,7 @@ let cfunc_of_func' module_name func =
     | Void -> assert false in
   match Func.name func with
     | None -> []
-    | Some name -> 
+    | Some name ->
         let open Libwasm.Types in
         let FuncType (args, rets) = Func.type_ func in
         (* Still only supporting 0 or 1-return functions *)
@@ -59,7 +59,7 @@ let cfunc_of_func' module_name func =
         (* First, need to sanitise the module name and method name *)
         let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
         let name = name_prefix ^ name in
-        [{ external_name = name_prefix ^ name; 
+        [{ external_name = name;
            internal_name = Util.Names.internal_name name;
            args = c_args; ret_ty = ret }]
 
@@ -78,7 +78,7 @@ let integer_register i =
   let registers =
     ["a"; "b"; "D"; "S"; "d"; "c"; "q8"; "q9";
      "q12"; "q13"; "q10"; "q11"; "Rbp"] in
-  if i > List.length registers - 1 then 
+  if i > List.length registers - 1 then
     failwith
       ("Error: Cannot generate C stubs for functions " ^
        "with greater than 13 integer arguments")
@@ -115,10 +115,10 @@ let generate_cstub func =
   let formatted_register_map =
     List.map (fun (name, reg) ->
       Printf.sprintf "\"%s\" (%s)" reg name) register_map
-    |> String.concat ", " 
+    |> String.concat ", "
   in
 
-    let result_decl = 
+    let result_decl =
     if func.ret_ty = Void then
       ""
     else
@@ -130,7 +130,7 @@ let generate_cstub func =
     else
       "return result;\n" in
 
-  let result_assignment = 
+  let result_assignment =
     if func.ret_ty = Void then
       ""
     else
@@ -150,6 +150,7 @@ let generate_cstub func =
     result_return ^ "}"
 
 let header ~module_name ~c_funcs =
+  Printf.printf "header module name: %s\n" module_name;
   let header_prefix =
     let header_prefix_path = Util.Command_line.header_prefix_path () in
     Util.Files.read_text_file header_prefix_path in
@@ -175,4 +176,4 @@ let header ~module_name ~c_funcs =
 let stub_file ~header_filename ~c_funcs =
   let func_stubs = List.map generate_cstub c_funcs |> String.concat "\n\n" in
   Printf.sprintf "#include \"%s\"\n\n%s\n" header_filename func_stubs
-  
+

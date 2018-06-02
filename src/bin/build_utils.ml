@@ -66,8 +66,7 @@ let generate_c_stubs ~header_filename (ir:Ir.Stackless.module_) =
   let funcs = Int32Map.bindings ir.funcs |> List.map (fun (_, (_, x)) -> x) in
   let module_name =
     Command_line.output_filename ()
-      |> Filename.basename
-      |> Filename.remove_extension in
+      |> Filename.basename in
   let c_funcs = C_stubs.cfuncs_of_funcs ~module_name funcs in
   let header = C_stubs.header ~module_name ~c_funcs in
   let stub = C_stubs.stub_file ~header_filename ~c_funcs in

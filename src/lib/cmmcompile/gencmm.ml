@@ -33,7 +33,7 @@ let compile_value =
   (* TODO: Float support *)
   | F32 x -> Cconst_float 0.0
   | F64 x -> Cconst_float 0.0
- 
+
 let compile_relop =
   let open Libwasm.Ast in
   let open Libwasm.Values in
@@ -67,7 +67,7 @@ let compile_relop =
       | F64 f64op -> Ccmpf (compile_float_op f64op)
 
 let compile_unop _ = failwith "TODO"
-let compile_binop op = 
+let compile_binop op =
   let open Libwasm.Ast in
   let open Libwasm.Values in
   (* FIXME: Signedness for division / modulo *)
@@ -101,11 +101,11 @@ let compile_binop op =
     | I64 i64op -> compile_int_op i64op
     | F32 f32op -> compile_float_op f32op
     | F64 f64op -> compile_float_op f64op
-  
-  
+
+
 let compile_cvtop _ = failwith "Conversion operators not done yet"
 
-let compile_type : Libwasm.Types.value_type -> machtype = 
+let compile_type : Libwasm.Types.value_type -> machtype =
   let open Libwasm.Types in
   function
     | I32Type -> typ_int
@@ -127,7 +127,7 @@ let compile_expression env =
   | Const value -> compile_value value
   | Test (test, v) ->
       let i = lv env v in
-      let cmp = 
+      let cmp =
         let open Libwasm.Types in
         match Var.type_ v with
           | I32Type -> Cconst_int 0
@@ -161,10 +161,10 @@ end = struct
 end
 
 let trap reason =
-  Cop (Cextcall ("__Cmmwasm_trap", typ_int, false, None), 
+  Cop (Cextcall ("__Cmmwasm_trap", typ_int, false, None),
     [Cconst_int reason], nodbg)
 
-let compile_terminator env = 
+let compile_terminator env =
   let open Stackless in
   let branch b =
     let lbl_id = Branch.label b |> Label.id in
@@ -184,14 +184,15 @@ let compile_terminator env =
       let br_id = Compile_env.lookup_label (Branch.label b) env in
       Cexit (br_id, args) in
   function
-    | Unreachable -> trap (TrapReasons.unreachable)
+    | Unreachable -> Ctuple []
+        (* TODO: Do this properly. trap (TrapReasons.unreachable) *)
     | Br b -> branch b
-    | BrTable { index ; es ; default } -> 
+    | BrTable { index ; es ; default } ->
         (* TODO: implement *)
         branch default
     | If { cond; ifso; ifnot } ->
         let cond_var = Cvar (lv env cond) in
-        let test = 
+        let test =
           Cop (Ccmpi Cne, [cond_var; Cconst_natint Nativeint.zero],
             nodbg) in
         let true_branch = branch ifso in
@@ -199,9 +200,9 @@ let compile_terminator env =
         Cifthenelse (test, true_branch, false_branch)
     | Call { func ; args; cont } ->
         (* Alright. We have a function, set of args, and a
-         * continuation branch, pre-populated with some args. 
+         * continuation branch, pre-populated with some args.
          * In addition, the continuation will take the return
-         * type(s) of the function, so should be prepended. 
+         * type(s) of the function, so should be prepended.
          * ...I think? *)
         let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
         (* We'll need to do some fun with tuples to properly handle
@@ -229,15 +230,15 @@ let compile_terminator env =
           match ret_tys with
             | [] -> compile_noreturn
             | [ty] -> compile_return1 ty
-            | _ -> 
-                failwith ("Can't currently compile functions with " 
+            | _ ->
+                failwith ("Can't currently compile functions with "
                   ^ "more than one return type")
         end
     | CallIndirect { type_; func; args; cont } ->
         (* TODO: implement *)
         Ctuple []
 
-(* compile_body: env -> W.terminator -> W.statement list -> Cmm.expression *) 
+(* compile_body: env -> W.terminator -> W.statement list -> Cmm.expression *)
 let rec compile_body env terminator = function
   | [] -> compile_terminator env terminator
   | x :: xs ->
@@ -298,13 +299,21 @@ let compile_function (ir_func: Stackless.func) func_md env =
   }
 
 (* Now we've named the functions in the IR pass, we can simplify this. *)
-let rec populate_symbols env (ir_module: Stackless.module_) : Compile_env.t =
+let rec populate_symbols module_name env (ir_module: Stackless.module_) : Compile_env.t =
   let open Libwasm.Ast in
+  let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
   Util.Maps.Int32Map.fold (fun _ (_, md) acc ->
     match Func.name md with
-      | Some _name -> Compile_env.bind_global_func_symbol md acc
+      | Some name ->
+          let name =
+            if Util.Command_line.generate_c () then
+              Util.Names.internal_name (name_prefix ^ name)
+            else
+              name_prefix ^ name in
+          (* Internal name if we're generating CMM; standard name if not *)
+          Compile_env.bind_global_func_symbol md name acc
       | None -> Compile_env.bind_internal_func_symbol md acc |> snd
-  ) (ir_module.funcs) env 
+  ) (ir_module.funcs) env
 
 let compile_functions env (ir_mod: Stackless.module_) =
   let open Util.Maps in
@@ -315,18 +324,19 @@ let compile_functions env (ir_mod: Stackless.module_) =
 (* TODO: Will need to extend this to properly register functions / globals /
  * memories with the RTS when we get to that point.
  * For now, the init function just calls the start method if one is defined. *)
-let init_function name env (ir_mod: Stackless.module_) =
+let init_function module_name env (ir_mod: Stackless.module_) =
+  let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
   let body =
     match ir_mod.start with
       | Some md ->
           let symbol_name =
-            Compile_env.lookup_func_symbol md env 
+            Compile_env.lookup_func_symbol md env
             |> Symbol.name in
           let fn_symbol = Cconst_symbol symbol_name in
           Cop (Capply typ_void, [fn_symbol], nodbg)
       | _ -> Ctuple [] in
   Cfunction {
-    fun_name = name ^ "_init";
+    fun_name = name_prefix ^ "init";
     fun_args = [];
     fun_body = body;
     fun_codegen_options = [No_CSE];
@@ -336,7 +346,7 @@ let init_function name env (ir_mod: Stackless.module_) =
 
 (* IR function to CMM phrase list *)
 let compile_module name (ir_mod: Stackless.module_) =
-  let env = populate_symbols Compile_env.empty ir_mod in
+  let env = populate_symbols name Compile_env.empty ir_mod in
   let init = init_function name env ir_mod in
   let funcs = compile_functions env ir_mod @ [init] in
   funcs

@@ -27,7 +27,7 @@ let bind_label lbl env =
       label_count = lbl_id + 1;
       label_env = Ir.Label.Id.Map.add (Ir.Label.id lbl) lbl_id env.label_env })
 
-let lookup_label lbl env = Ir.Label.Id.Map.find (Ir.Label.id lbl) env.label_env 
+let lookup_label lbl env = Ir.Label.Id.Map.find (Ir.Label.id lbl) env.label_env
 
 let bind_internal_func_symbol func env =
   let open Symbol in
@@ -43,19 +43,10 @@ let bind_internal_func_symbol func env =
 
 let lookup_func_symbol func env = Ir.Func.Map.find func env.func_symbols
 
-let bind_global_func_symbol (md: Ir.Func.t) env =
-  let open Symbol in
-  let name =
-    match Ir.Func.name md with
-      | Some name ->
-          (* Internal name if we're generating CMM; standard name if not *)
-          if Util.Command_line.generate_c () then
-            Util.Names.internal_name name
-          else name
-      | _ -> failwith "Global function metadata must be named!" in
-  { env with 
-      func_symbols = 
-        Ir.Func.Map.add md (Exported_symbol name) env.func_symbols 
+let bind_global_func_symbol (md: Ir.Func.t) (name: string) env =
+  { env with
+      func_symbols =
+        Ir.Func.Map.add md (Symbol.Exported_symbol name) env.func_symbols
   }
 
 let symbols env =
@@ -63,7 +54,7 @@ let symbols env =
 
 let dump env =
   let open Ir in
-  
+
   let print_var_env () =
     let bindings = Var.Map.bindings (env.var_env) in
     List.iter (fun (k, v) ->
@@ -100,4 +91,4 @@ let dump env =
   Printf.printf "Func count: %d\n" env.func_count
 
 
-  
+
