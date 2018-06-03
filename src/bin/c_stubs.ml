@@ -25,6 +25,16 @@ let string_of_ctype = function
   | F64 -> "f64"
   | Void -> "void"
 
+  (*
+let base_string_of_ctype = function
+  | U32 -> "int"
+  | U64 -> "int"
+  | F32 -> "float"
+  | F64 -> "float"
+  | Void -> "void"
+  *)
+
+
 let signature func =
   let args =
     List.map (fun (n, ty) ->
@@ -73,48 +83,62 @@ let cfunc_of_func ~module_name func =
 let cfuncs_of_funcs ~module_name funcs =
   List.concat (List.map (cfunc_of_func' module_name) funcs)
 
-let integer_register i =
+let int_registers =
   (* OCaml calling conventions, you be crazy.. *)
-  let registers =
-    ["a"; "b"; "D"; "S"; "d"; "c"; "q8"; "q9";
-     "q12"; "q13"; "q10"; "q11"; "Rbp"] in
-  if i > List.length registers - 1 then
-    failwith
-      ("Error: Cannot generate C stubs for functions " ^
-       "with greater than 13 integer arguments")
-  else
-    List.nth registers i
+    ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9";
+     "r12"; "r13"; "r10"; "r11"; "rbp"]
 
 let float_register i =
-  if i > 16 then
+  if i > 15 then
     failwith
       ("Error: cannot generate C stubs for functions " ^
        "with greater than 16 float arguments")
   else
-    "v" ^ (string_of_int i)
+    "xmm" ^ (string_of_int i)
 
 let generate_cstub func =
+  (* Helpers *)
+  let try_get_register = function
+    | [] -> failwith @@
+        "Exhausted registers: we only support " ^
+        "stub generation for functions with up to 13 integer and 16 float arguments."
+    | x :: xs -> (x, xs) in
+  let is_int_type = function
+    | U32 | U64 -> true | _ -> false in
+  let is_float_type = function
+    | F32 | F64 -> true | _ -> false in
+
   (* C stub must:
     * 1) Define variable to hold result, of result type
     * 2) Generate volatile ASM stub:
       *  a) If result is an integer, it goes into a
-      *  b) If result is a float, it goes into %xmm0 = v0
+      *  b) If result is a float, it goes into Yz
       *  c) Each integer argument goes into abc...
       *  d) Each float goes into xmm...
     * 3) C return of result type *)
-  let rec assign_registers i_count f_count = function
+  let rec assign_registers int_registers float_count = function
     | [] -> []
-    | (name, U32) :: xs | (name, U64) :: xs ->
-        let reg = integer_register i_count in
-        (name, reg) :: assign_registers (i_count + 1) f_count xs
-    | (name, F32) :: xs | (name, F64) :: xs ->
-        let reg = float_register f_count in
-        (name, reg) :: assign_registers i_count (f_count + 1) xs
-    | (_, Void) :: _ -> assert false in
-  let register_map = assign_registers 0 0 func.args in
+    | (name, ty) :: xs when is_int_type ty ->
+        let (reg, rest) = try_get_register int_registers in
+        (name, ty, reg) :: assign_registers rest float_count xs
+    | (name, ty) :: xs when is_float_type ty ->
+        let reg = float_register float_count in
+        (name, ty, reg) :: assign_registers int_registers (float_count + 1) xs
+    | _ :: _ -> assert false in
+
+  let register_map = assign_registers int_registers 0 func.args in
+
+  let defined_registers =
+    let define_register (name, ty, reg) =
+      Printf.sprintf "  register %s r%s asm (\"%s\") = %s;\n"
+        (string_of_ctype ty) name reg name in
+    List.map define_register register_map
+    |> String.concat "" in
+
   let formatted_register_map =
-    List.map (fun (name, reg) ->
-      Printf.sprintf "\"%s\" (%s)" reg name) register_map
+    List.map (fun (name, ty, _reg) ->
+      let reg_constraint = if is_int_type ty then "q" else "v" in
+      Printf.sprintf "\"%s\" (r%s)" reg_constraint name) register_map
     |> String.concat ", "
   in
 
@@ -137,13 +161,14 @@ let generate_cstub func =
       let result_register =
         match func.ret_ty with
           | U32 | U64 -> "\"=a\""
-          | F32 | F64 -> "\"=v0\""
+          | F32 | F64 -> "\"=Yz\""
           | Void -> assert false in
       Printf.sprintf "%s (result)" result_register in
 
 
   signature func ^ " {\n" ^
     result_decl ^
+    defined_registers ^
     (Printf.sprintf "  asm volatile(\"call %s\" : %s : "
       (func.internal_name) result_assignment) ^
     formatted_register_map ^ " : \"memory\", \"cc\");\n" ^
@@ -162,7 +187,8 @@ let header ~module_name ~c_funcs =
     |> String.concat "\n" in
 
   let header_name =
-    Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii module_name) in
+    let sanitised = Util.Names.sanitise module_name in
+    Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii sanitised) in
   let rts_basename = Filename.basename (Util.Command_line.rts_header ()) in
 
   "#ifndef " ^ header_name ^ "\n" ^
