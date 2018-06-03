@@ -435,9 +435,5 @@ if __name__ == '__main__':
   try:
     sys.exit(main(sys.argv[1:]))
   except Error as e:
-    # TODO(binji): gcc will output unicode quotes in errors since the terminal
-    # environment allows it, but python2 stderr will always attempt to convert
-    # to ascii first, which fails. This will replace the invalid characters
-    # instead, which is ugly, but works.
-    sys.stderr.write(u'{0}\n'.format(e).encode('ascii', 'replace'))
+    sys.stderr.write(str(e))
     sys.exit(1)
