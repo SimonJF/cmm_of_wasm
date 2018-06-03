@@ -5,7 +5,6 @@ val create :
   continuation:Label.t ->
   return:Label.t ->
   locals:Var.t Util.Maps.Int32Map.t ->
-  label_stack:Label.t list ->
   globals:(Stackless.global * Global.t) Util.Maps.Int32Map.t ->
   functions:Func.t Util.Maps.Int32Map.t ->
   t
@@ -24,7 +23,7 @@ val with_stack : Var.t list -> t -> t
 
 (* Control stack *)
 val push_label : Label.t -> t -> t
-val nth_label : depth:int -> t -> Label.t
+val nth_label : Libwasm.Ast.var -> t -> Label.t
 
 (* Local variable store *)
 val set_local : Libwasm.Ast.var -> Var.t -> t -> t

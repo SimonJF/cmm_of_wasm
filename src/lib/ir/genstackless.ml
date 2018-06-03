@@ -2,7 +2,7 @@ open Stackless
 open Libwasm.Source
 
 (* IR generation *)
-let terminate 
+let terminate
   (code: Stackless.statement list)
   (terminator: Stackless.terminator) = {
   body = List.rev code;
@@ -12,10 +12,15 @@ let terminate
 let ir_term env instrs =
   let open Libwasm.Ast in
   let rec transform_instrs env generated (instrs: instr list) =
-    let label_and_args env (n: int32 phrase) =
-      let lbl = Translate_env.nth_label (Int32.to_int n.it) env in
+    let label_and_args env (n: Libwasm.Ast.var) =
+      let lbl = Translate_env.nth_label n env in
       let arity = Label.arity lbl in
       let (args, _) = Translate_env.popn_rev arity env in
+      let args =
+        if Label.needs_locals lbl then
+          args @ (Translate_env.locals env)
+        else
+          args in
       (lbl, args) in
 
     (* Main *)
@@ -30,17 +35,17 @@ let ir_term env instrs =
           let arity = Label.arity cont_label in
           let (returned, _) = Translate_env.popn_rev arity env in
           let locals = Translate_env.locals env in
-          (* Function return doesn't need locals  *)
+          (* Some labels (e.g., function returns and calls) don't need to record
+           * new locals *)
           let args =
-            if (Label.Id.is_return (Label.id cont_label)) then
-              returned
+            if (Label.needs_locals cont_label) then
+              returned @ locals
             else
-              returned @ locals in
+              returned in
           let return_branch = Branch.create cont_label args in
           let terminator = Stackless.Br return_branch in
           terminate generated terminator
       | x :: xs ->
-
           (* Binds a "pushed" variable, records on virtual stack *)
           let bind env x ty =
             let v = Var.create ty in
@@ -53,7 +58,7 @@ let ir_term env instrs =
 
           (* Capturing a continuation *)
           let capture_continuation env parameter_tys require_locals =
-            let lbl = Label.create (List.length parameter_tys) in
+            let lbl = Label.create (List.length parameter_tys) require_locals in
             (* Create parameters for each argument type required by continuation. *)
             let arg_params = List.map Var.create parameter_tys in
             (* All continuations take the required parameters.
@@ -86,18 +91,17 @@ let ir_term env instrs =
             | Select ->
                 let [@warning "-8"] ([cond; ifnot; ifso], env) =
                   Translate_env.popn 3 env in
-                bind 
+                bind
                   env
-                  (Stackless.Select { cond; ifso; ifnot }) 
+                  (Stackless.Select { cond; ifso; ifnot })
                   (Var.type_ ifso)
             | Block (tys, is) ->
                 (* Capture current continuation *)
                 let (cont_lbl, cont) = capture_continuation env tys true in
                 (* Codegen block, with return set to captured continuation, and push label *)
-                let lbl = Label.create ~arity:(List.length tys) in
                 let env =
                   env
-                  |> Translate_env.push_label lbl
+                  |> Translate_env.push_label cont_lbl
                   |> Translate_env.with_stack []
                   |> Translate_env.with_continuation cont_lbl in
                 transform_instrs env (cont :: generated) is
@@ -106,7 +110,7 @@ let ir_term env instrs =
                 let (cont_lbl, cont) = capture_continuation env tys true in
 
                 (* Loop continuation creation *)
-                let loop_lbl = Label.create 0 in
+                let loop_lbl = Label.create 0 true in
                 let locals = Translate_env.locals env in
                 let loop_params = List.map Var.rename locals in
                 let loop_env =
@@ -125,19 +129,19 @@ let ir_term env instrs =
                 let (cond, env) = Translate_env.pop env in
                 let (cont_lbl, cont) = capture_continuation env tys true in
 
-                let fresh_env lbl =
+                let fresh_env =
                   env
-                  |> Translate_env.push_label lbl
+                  |> Translate_env.push_label cont_lbl
                   |> Translate_env.with_stack []
                   |> Translate_env.with_continuation cont_lbl in
 
                 (* For each branch, make a continuation with a fresh label,
                  * containing the instructions in the branch. *)
                 let make_branch instrs =
-                  let lbl = Label.create 0 in
-                  let env = fresh_env lbl in
+                  let lbl = Label.create 0 false in
+                  let env = fresh_env in
                   let transformed = transform_instrs env [] instrs in
-                  (Branch.create lbl [], 
+                  (Branch.create lbl [],
                    Cont (lbl, [], false, transformed)) in
 
                 (* Make true and false branches *)
@@ -209,7 +213,7 @@ let ir_term env instrs =
             | SetLocal var ->
                 let (new_val, env) = Translate_env.pop env in
                 bind_local env var new_val
-            | TeeLocal var -> 
+            | TeeLocal var ->
                 let (new_val, _) = Translate_env.pop env in
                 bind_local env var new_val
             | GetGlobal var ->
@@ -279,7 +283,7 @@ let bind_locals env params locals =
       let instr = Let (v, x) in
       (Int32.(add i one), instr :: instrs, env)
     ) (i, [], env) locals in
-  ((List.rev instrs_rev), env) 
+  ((List.rev instrs_rev), env)
 
 let ir_func
     (functions: Func.t Util.Maps.Int32Map.t)
@@ -303,7 +307,6 @@ let ir_func
       ~stack:[]
       ~continuation:ret
       ~return:ret
-      ~label_stack:[ret]
       ~locals:Util.Maps.Int32Map.empty
       ~globals:globs
       ~functions:functions in
@@ -381,6 +384,9 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let funcs =
       List.fold_left (fun (i, acc) func ->
         let md = Int32Map.find i func_metadata_map in
+        (*
+        Printf.printf "Compiling %s\n%!" ( match Func.name md with | Some x -> x | None -> "unnamed");
+        *)
         let compiled_func = ir_func func_metadata_map globals func md in
         let acc = Int32Map.add i (compiled_func, md) acc in
         (Int32.(add i one), acc)

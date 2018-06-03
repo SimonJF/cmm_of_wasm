@@ -150,7 +150,6 @@ let generate_cstub func =
     result_return ^ "}"
 
 let header ~module_name ~c_funcs =
-  Printf.printf "header module name: %s\n" module_name;
   let header_prefix =
     let header_prefix_path = Util.Command_line.header_prefix_path () in
     Util.Files.read_text_file header_prefix_path in
