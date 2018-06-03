@@ -5,20 +5,17 @@ type t = {
   block_continuation: Label.t;
   function_return: Label.t;
   locals: Var.t Int32Map.t;
-  labels: Label.t Int32Map.t;
-  label_count: int32;
+  labels: Label.t list;
   globals: (Stackless.global * Global.t) Int32Map.t;
   functions: Func.t Int32Map.t
 }
 
 let create ~stack ~continuation ~return ~locals ~globals ~functions =
-  let init_labels = Int32Map.add (Int32.minus_one) return Int32Map.empty in
   {
   stack;
   block_continuation = continuation;
   function_return = return;
-  labels = init_labels;
-  label_count = 0l;
+  labels = [continuation];
   locals;
   globals;
   functions
@@ -31,11 +28,7 @@ let with_continuation lbl env =
   { env with block_continuation = lbl }
 
 let push_label lbl env =
-  let old_count = env.label_count in {
-  env with
-    label_count = Int32.(add env.label_count one);
-    labels = (Int32Map.add old_count lbl env.labels)
-}
+  { env with labels = lbl :: env.labels }
 
 let set_local (var: Libwasm.Ast.var) value env =
   { env with locals = Int32Map.add (var.it) value (env.locals) }
@@ -56,10 +49,10 @@ let pop2 env =
     | _ -> failwith "FATAL (pop2): Tried to pop from empty virtual stack"
 
 let nth_label (depth_var: Libwasm.Ast.var) env =
-  let depth = depth_var.it in
-  Int32Map.find depth env.labels
+  List.nth env.labels (Int32.to_int depth_var.it) 
 
 let popn n env =
+  (* Printf.printf "popn n = %d, height = %d\n" n (List.length env.stack); *)
   let rec go n xs =
     if n = 0 then ([], xs) else
       match xs with

@@ -70,6 +70,7 @@ let ir_term env instrs =
               else [] in
             (* Push parameters onto to virtual stack *)
             let stack = Translate_env.stack env in
+            (* TODO: I think that the argument parameters be reversed... *)
             let new_stack = arg_params @ stack in
             let env =
               let base_env = Translate_env.with_stack new_stack env in
@@ -384,9 +385,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let funcs =
       List.fold_left (fun (i, acc) func ->
         let md = Int32Map.find i func_metadata_map in
-        (*
-        Printf.printf "Compiling %s\n%!" ( match Func.name md with | Some x -> x | None -> "unnamed");
-        *)
+        (* Printf.printf "Compiling %s\n%!" ( match Func.name md with | Some x -> x | None -> "unnamed"); *)
         let compiled_func = ir_func func_metadata_map globals func md in
         let acc = Int32Map.add i (compiled_func, md) acc in
         (Int32.(add i one), acc)
