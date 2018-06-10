@@ -173,10 +173,10 @@ let compile_terminator env =
         Cvar (lv env v)) (Branch.arguments b) in
 
     if Label.Id.is_return lbl_id then
-      (* FIXME: Currently only supporting the return of either 0 or 1 args *)
       begin
         match args with
-          | [] -> Ctuple []
+          | [] ->
+              Ctuple []
           | [x] -> x
           | _ -> failwith "Can only currently return a single argument from a function"
       end

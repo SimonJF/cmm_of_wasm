@@ -116,9 +116,11 @@ let ir_term env instrs =
                 let loop_params = List.map Var.rename locals in
                 let loop_env =
                   env
+                  |> Translate_env.push_label loop_lbl
                   |> Translate_env.with_stack []
                   |> Translate_env.with_continuation cont_lbl
                   |> Translate_env.with_locals loop_params in
+
                 let loop_branch = Branch.create loop_lbl locals in
                 let loop_term = transform_instrs loop_env [] is in
                 let loop_cont = Cont (loop_lbl, loop_params, true, loop_term) in
@@ -161,7 +163,7 @@ let ir_term env instrs =
             | BrIf nesting ->
                 let (cond, env) = Translate_env.pop env in
                 (* If condition is true, branch, otherwise continue *)
-                let (cont_lbl, cont) = capture_continuation env [] true in
+                let (cont_lbl, cont) = capture_continuation env [] false in
                 let (lbl, args) = label_and_args env nesting in
                 let br_branch = Branch.create lbl args in
                 let cont_branch = Branch.create cont_lbl [] in
@@ -185,7 +187,7 @@ let ir_term env instrs =
                 (* NOTE: We don't need to do anything with
                  * locals here as locals can't escape a function. *)
                 let arity =
-                  Translate_env.continuation env
+                  Translate_env.return env
                   |> Label.arity in
                 let (returned, env) = Translate_env.popn_rev arity env in
                 let function_return = Translate_env.return env in

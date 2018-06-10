@@ -24,7 +24,6 @@ val with_stack : Var.t list -> t -> t
 (* Control stack *)
 val push_label : Label.t -> t -> t
 val nth_label : Libwasm.Ast.var -> t -> Label.t
-
 (* Local variable store *)
 val set_local : Libwasm.Ast.var -> Var.t -> t -> t
 val get_local : Libwasm.Ast.var -> t -> Var.t
