@@ -70,8 +70,8 @@ let ir_term env instrs =
               else [] in
             (* Push parameters onto to virtual stack *)
             let stack = Translate_env.stack env in
-            (* TODO: I think that the argument parameters be reversed... *)
-            let new_stack = arg_params @ stack in
+            (* TODO: I think that the argument parameters need to be reversed... *)
+            let new_stack = (List.rev arg_params) @ stack in
             let env =
               let base_env = Translate_env.with_stack new_stack env in
               if require_locals then

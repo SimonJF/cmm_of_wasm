@@ -115,8 +115,8 @@ let compile_binop env op v1 v2 =
     | Max ->
        let (i1, i2) = (lv env v1, lv env v2) in
         Cifthenelse (
-          Cop (Ccmpf CFle, [Cvar i1; Cvar i2], nodbg),
-          Cvar i2, Cvar i1)
+          Cop (Ccmpf CFge, [Cvar i1; Cvar i2], nodbg),
+          Cvar i1, Cvar i2)
     | CopySign -> compile_simple Caddf (* TODO: Implement (!?) *) in
   match op with
     | I32 i32op -> compile_int_op i32op
