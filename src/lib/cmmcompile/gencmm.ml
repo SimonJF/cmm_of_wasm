@@ -31,8 +31,8 @@ let compile_value =
   | I32 x -> Cconst_int (Int32.to_int x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
   (* TODO: Float support *)
-  | F32 x -> Cconst_float 0.0
-  | F64 x -> Cconst_float 0.0
+  | F32 x -> Cconst_float (Libwasm.F32.to_float x)
+  | F64 x -> Cconst_float (Libwasm.F64.to_float x)
 
 let compile_relop =
   let open Libwasm.Ast in
@@ -67,41 +67,62 @@ let compile_relop =
       | F64 f64op -> Ccmpf (compile_float_op f64op)
 
 let compile_unop _ = failwith "TODO"
-let compile_binop op =
+
+let compile_binop env op v1 v2 =
   let open Libwasm.Ast in
   let open Libwasm.Values in
+
+  let compile_simple cmmop =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    Cop (cmmop, [Cvar i1; Cvar i2], nodbg) in
+
   (* FIXME: Signedness for division / modulo *)
   let compile_int_op =
     let open Libwasm.Ast.IntOp in
     function
-    | Add -> Caddi
-    | Sub -> Csubi
-    | Mul -> Cmuli
-    | DivS -> Cdivi
-    | DivU -> Cdivi
-    | RemS -> Cmodi
-    | RemU -> Cmodi
+    | Add -> compile_simple Caddi
+    | Sub -> compile_simple Csubi
+    | Mul -> compile_simple Cmuli
+    | DivS -> compile_simple Cdivi
+    | DivU -> compile_simple Cdivi
+    | RemS -> compile_simple Cmodi
+    | RemU -> compile_simple Cmodi
     (* TODO: Ensure that these are actually bitwise
      * operators and not just binary ones...*)
-    | And -> Cand
-    | Or -> Cor
-    | Xor -> Cxor
+    | And -> compile_simple Cand
+    | Or -> compile_simple Cor
+    | Xor -> compile_simple Cxor
     (* TODO: Shift right operators ignore signedness right now... *)
-    | Shl -> Clsl
-    | ShrS -> Clsr
-    | ShrU -> Clsr
+    | Shl -> compile_simple Clsl
+    | ShrS -> compile_simple Clsr
+    | ShrU -> compile_simple Clsr
     (* TODO: implement rotation *)
-    | Rotl -> Clsl
-    | Rotr -> Clsl in
-  let compile_float_op _ =
-    (* FIXME: Just here to get things going to start off with... *)
-    Caddf in
+    | Rotl -> compile_simple Clsl
+    | Rotr -> compile_simple Clsl in
+  let compile_float_op =
+    let open Libwasm.Ast.FloatOp in
+    function
+    | Add -> compile_simple Caddf
+    | Sub -> compile_simple Csubf
+    | Mul -> compile_simple Cmulf
+    | Div -> compile_simple Cdivf
+    (* These will have been checked and compiled elsewhere. *)
+    | Min ->
+        let (i1, i2) = (lv env v1, lv env v2) in
+        Cifthenelse (
+          Cop (Ccmpf CFle, [Cvar i1; Cvar i2], nodbg),
+          Cvar i1, Cvar i2)
+    | Max ->
+       let (i1, i2) = (lv env v1, lv env v2) in
+        Cifthenelse (
+          Cop (Ccmpf CFle, [Cvar i1; Cvar i2], nodbg),
+          Cvar i2, Cvar i1)
+    | CopySign -> compile_simple Caddf (* TODO: Implement (!?) *) in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
     | F32 f32op -> compile_float_op f32op
     | F64 f64op -> compile_float_op f64op
-
 
 let compile_cvtop _ = failwith "Conversion operators not done yet"
 
@@ -147,9 +168,12 @@ let compile_expression env =
       *)
       Cvar (lv env v)
   | Binary (bin, v1, v2) ->
-      let op = compile_binop bin in
+      compile_binop env bin v1 v2
+      (*
+      let op = compile_binop bin v1 v2 in
       let (i1, i2) = (lv env v1, lv env v2) in
       Cop (op, [Cvar i1; Cvar i2], nodbg)
+      *)
   | Convert (cvt, v) ->
       let op = compile_cvtop cvt in
       Cop (op, [Cvar (lv env v)], nodbg)

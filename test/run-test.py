@@ -374,7 +374,7 @@ def main(args):
 
   with utils.TempDirectory(options.out_dir, 'cmm_of_wasm-test-') as out_dir:
     # Parse JSON file and generate main .c file with calls to test functions.
-    print("out_dir: ", out_dir)
+    #print("out_dir: ", out_dir)
     wast2json = utils.Executable(
         wast2json_executable(options.external_bin_dir),
         error_cmdline=options.error_cmdline)
