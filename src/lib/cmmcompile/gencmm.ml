@@ -3,6 +3,7 @@ open Ir
 open Cmm
 open Symbol
 
+(* Environment access helper functions *)
 let lv env x = Compile_env.lookup_var x env
 
 let ll env lbl = Compile_env.lookup_label lbl env
@@ -23,11 +24,47 @@ let bind_vars vs env =
 
 let nodbg = Debuginfo.none
 
-(* We're making the assumption here that we're on a 64-bit architecture at the moment.
+(* Trapping *)
+
+type trap_reason =
+  | TrapNone
+  | TrapOOB
+  | TrapIntOverflow
+  | TrapDivZero
+  | TrapInvalidConversion
+  | TrapUnreachable
+  | TrapCallIndirect
+  | TrapExhaustion
+
+(* Provides an index to be given to the C trap call, corresponding
+ * to the `wasm_rt_trap_t` enumeration index *)
+let trap_id = function
+  | TrapNone -> 0
+  | TrapOOB -> 1
+  | TrapIntOverflow -> 2
+  | TrapDivZero -> 3
+  | TrapInvalidConversion -> 4
+  | TrapUnreachable -> 5
+  | TrapCallIndirect -> 6
+  | TrapExhaustion -> 7
+
+let trap reason =
+  Cop (Cextcall ("wasm_rt_trap", typ_int, false, None),
+    [Cconst_int (trap_id reason)], nodbg)
+
+(* Compilation *)
+
+(* Cmm_of_wasm assumes a 64-bit host and target architecture. I do not intend
+ * to support 32-bit architectures any time soon.
+ *
  * FIXME: We're (erroneously) treating 32-bit integers as 64-bit integers here.
- * FIXME: We're not supporting floats yet. (represented as 64-bit ints in WASM,
- * and I'm not quite sure of the mapping to machine floats yet).
- *)
+ * The 64-bit integer operations can be easily solved with some bit-twiddling
+ * upon loads and stores (and operation sites, in the case of division and mod.
+ *
+ * FIXME: We're not supporting 32-bit floats yet, which are erroneously
+ * compiled as 64-bit floats.
+ * This needs more thought.
+ * *)
 let compile_value =
   let open Libwasm.Values in
   function
@@ -79,6 +116,24 @@ let compile_binop env op v1 v2 =
     let (i1, i2) = (lv env v1, lv env v2) in
     Cop (cmmop, [Cvar i1; Cvar i2], nodbg) in
 
+  (* TODO: This only works for unsigned 64-bit integers at the moment.
+   * For unsigned 32-bit integers, we need to zero out the 32 least-significant
+   * bytes. For signed 32-bit integers, we need to sign extend to the 32 least-significant
+   * bytes. *)
+  let division_operation op =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    let cmp =
+       match Var.type_ v2 with
+          | I32Type -> Cconst_int 0
+          | I64Type -> Cconst_natint Nativeint.zero
+          | _ -> assert false in
+    Cifthenelse (
+      Cop (Ccmpa Ceq, [Cvar i2 ; cmp], nodbg),
+      trap TrapDivZero,
+      Cop (Cdivi, [Cvar i1; Cvar i2], nodbg)
+    ) in
+
+
   (* FIXME: Signedness for division / modulo *)
   let compile_int_op =
     let open Libwasm.Ast.IntOp in
@@ -86,10 +141,10 @@ let compile_binop env op v1 v2 =
     | Add -> compile_simple Caddi
     | Sub -> compile_simple Csubi
     | Mul -> compile_simple Cmuli
-    | DivS -> compile_simple Cdivi
-    | DivU -> compile_simple Cdivi
-    | RemS -> compile_simple Cmodi
-    | RemU -> compile_simple Cmodi
+    | DivS -> division_operation Cdivi
+    | DivU -> division_operation Cdivi
+    | RemS -> division_operation Cmodi
+    | RemU -> division_operation Cmodi
     (* TODO: Ensure that these are actually bitwise
      * operators and not just binary ones...*)
     | And -> compile_simple Cand
@@ -176,16 +231,6 @@ let compile_expression env =
       let op = compile_cvtop cvt in
       Cop (op, [Cvar (lv env v)], nodbg)
 
-module TrapReasons : sig
-  val unreachable : int
-end = struct
-  let unreachable = 0
-end
-
-let trap reason =
-  Cop (Cextcall ("__Cmmwasm_trap", typ_int, false, None),
-    [Cconst_int reason], nodbg)
-
 let compile_terminator env =
   let open Stackless in
   let branch b =
@@ -206,8 +251,7 @@ let compile_terminator env =
       let br_id = Compile_env.lookup_label (Branch.label b) env in
       Cexit (br_id, args) in
   function
-    | Unreachable -> Ctuple []
-        (* TODO: Do this properly. trap (TrapReasons.unreachable) *)
+    | Unreachable -> trap TrapUnreachable
     | Br b -> branch b
     | BrTable { index ; es ; default } ->
         (* Bounds check needs to be done at runtime. *)
