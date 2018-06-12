@@ -425,6 +425,7 @@ def main(args):
       Link(cc, o_filenames, main_exe, out_dir, '-lm')
 
     if options.compile and options.run:
+      print("Running", os.path.join(out_dir, main_exe))
       utils.Executable(os.path.join(out_dir, main_exe),
                        forward_stdout=True).RunWithArgs()
 

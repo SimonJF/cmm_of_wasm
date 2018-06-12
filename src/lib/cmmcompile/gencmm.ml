@@ -5,6 +5,9 @@ open Symbol
 
 let lv env x = Compile_env.lookup_var x env
 
+let ll env lbl = Compile_env.lookup_label lbl env
+let llb env br = ll env (Branch.label br)
+
 let bind_var v env =
   let ident = Ident.create (Var.to_string v) in
   let env = Compile_env.bind_var v ident env in
@@ -169,11 +172,6 @@ let compile_expression env =
       Cvar (lv env v)
   | Binary (bin, v1, v2) ->
       compile_binop env bin v1 v2
-      (*
-      let op = compile_binop bin v1 v2 in
-      let (i1, i2) = (lv env v1, lv env v2) in
-      Cop (op, [Cvar i1; Cvar i2], nodbg)
-      *)
   | Convert (cvt, v) ->
       let op = compile_cvtop cvt in
       Cop (op, [Cvar (lv env v)], nodbg)
@@ -212,8 +210,28 @@ let compile_terminator env =
         (* TODO: Do this properly. trap (TrapReasons.unreachable) *)
     | Br b -> branch b
     | BrTable { index ; es ; default } ->
-        (* TODO: implement *)
-        branch default
+        (* Bounds check needs to be done at runtime. *)
+        let lbl_id = Ident.create "br_table_lbl" in
+        let branches = es @ [default] in
+        let default_id = (List.length branches) - 1 in
+        let branches_exprs =
+          List.map branch branches
+          |> Array.of_list in
+        let switch_ids = Array.make (List.length branches) 0 in
+        let () = Array.iteri (fun i _ -> switch_ids.(i) <- i) switch_ids in
+        let idx = lv env index in
+
+        Clet (lbl_id,
+          Cifthenelse (
+            (* Test whether index exceeds bounds *)
+            Cop (Ccmpa Cge,
+              [Cvar idx; Cconst_int (List.length es)], nodbg),
+            (* If so, return the default branch *)
+            Cconst_int (default_id),
+            (* Otherwise, return the index *)
+            Cvar idx),
+            (* Implement br_table using Cswitch *)
+            Cswitch (Cvar lbl_id, switch_ids, branches_exprs, nodbg))
     | If { cond; ifso; ifnot } ->
         let cond_var = Cvar (lv env cond) in
         let test =

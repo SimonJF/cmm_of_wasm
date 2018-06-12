@@ -16,14 +16,7 @@ disabled = [
     # Relies on floats for loop bounds in one test and thus infinite loops.
     # Remove when floats are implemented.
      "loop.wast",
-
-    # Br_table unimplemented in CMM, so skipping this until it is
-    "br_table.wast"
-
-    # f32 and f64 take ages and also fail at the moment as they're unimplemented
-    #"f32.wast",
-    #"f64.wast"
-]
+    ]
 
 
 def write_file(filename, contents):
