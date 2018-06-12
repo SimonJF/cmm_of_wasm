@@ -137,7 +137,7 @@ let generate_cstub func =
 
   let formatted_register_map =
     List.map (fun (name, ty, _reg) ->
-      let reg_constraint = if is_int_type ty then "q" else "v" in
+      let reg_constraint = if is_int_type ty then "q" else "x" in
       Printf.sprintf "\"%s\" (r%s)" reg_constraint name) register_map
     |> String.concat ", "
   in
@@ -146,13 +146,22 @@ let generate_cstub func =
     if func.ret_ty = Void then
       ""
     else
-      Printf.sprintf "  %s result;\n" (string_of_ctype func.ret_ty) in
+      let result_register =
+        match func.ret_ty with
+          | U32 | U64 -> "rax"
+          | F32 | F64 -> "xmm0"
+          | Void -> assert false in
+      Printf.sprintf "  register %s result_asm asm(\"%s\");\n" (string_of_ctype func.ret_ty) result_register in
+
+  let stable_result =
+    if func.ret_ty = Void then "" else
+      Printf.sprintf "  %s result = result_asm;\n" (string_of_ctype func.ret_ty) in
 
   let result_return =
     if func.ret_ty = Void then
-      "return;\n"
+      "  return;\n"
     else
-      "return result;\n" in
+      "  return result;\n" in
 
   let result_assignment =
     if func.ret_ty = Void then
@@ -161,17 +170,18 @@ let generate_cstub func =
       let result_register =
         match func.ret_ty with
           | U32 | U64 -> "\"=a\""
-          | F32 | F64 -> "\"=Yz\""
+          | F32 | F64 -> "\"=x\""
           | Void -> assert false in
-      Printf.sprintf "%s (result)" result_register in
+      Printf.sprintf "%s (result_asm)" result_register in
 
 
   signature func ^ " {\n" ^
-    result_decl ^
     defined_registers ^
+    result_decl ^
     (Printf.sprintf "  asm volatile(\"call %s\" : %s : "
       (func.internal_name) result_assignment) ^
     formatted_register_map ^ " : \"memory\", \"cc\");\n" ^
+    stable_result ^
     result_return ^ "}"
 
 let header ~module_name ~c_funcs =
@@ -193,6 +203,7 @@ let header ~module_name ~c_funcs =
 
   "#ifndef " ^ header_name ^ "\n" ^
   "#define " ^ header_name ^ "\n" ^
+  "#include <stdio.h>" ^ "\n" ^
   "#include \"" ^ rts_basename ^ "\"\n" ^
   header_prefix ^ "\n" ^
   header_exports ^ "\n" ^
