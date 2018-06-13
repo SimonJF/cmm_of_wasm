@@ -248,7 +248,6 @@ let ir_term env instrs =
             | Compare relop ->
                 let (v2, v1), env = Translate_env.pop2 env in
                 let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
-                let _ = Translate_env.dump_stack env in
                 let _ = assert (v1ty = v2ty) in
                 bind env (Stackless.Compare (relop, v1, v2)) Libwasm.Types.I32Type
             | Unary unop ->
@@ -257,7 +256,6 @@ let ir_term env instrs =
             | Binary binop ->
                 let (v2, v1), env = Translate_env.pop2 env in
                 let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
-                let _ = Translate_env.dump_stack env in
                 let _ = assert (v1ty = v2ty) in
                 bind env (Stackless.Binary (binop, v1, v2)) v1ty
             | Convert cvtop ->
