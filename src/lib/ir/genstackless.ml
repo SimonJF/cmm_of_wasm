@@ -186,11 +186,9 @@ let ir_term env instrs =
             | Return ->
                 (* NOTE: We don't need to do anything with
                  * locals here as locals can't escape a function. *)
-                let arity =
-                  Translate_env.return env
-                  |> Label.arity in
-                let (returned, env) = Translate_env.popn_rev arity env in
                 let function_return = Translate_env.return env in
+                let arity = Label.arity function_return in
+                let (returned, env) = Translate_env.popn_rev arity env in
                 let branch = Branch.create function_return returned in
                 terminate generated (Stackless.Br branch)
             | Call var ->
@@ -199,10 +197,10 @@ let ir_term env instrs =
                 let FuncType (arg_tys, ret_tys) = Func.type_ func in
                 (* TODO: Optimise for empty continuations, taking into account
                  * logic in "[]" case *)
-                (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation env ret_tys false in
                 (* Grab args to the function *)
                 let (args, env) = Translate_env.popn_rev (List.length arg_tys) env in
+                (* Capture current continuation *)
+                let (cont_lbl, cont) = capture_continuation env ret_tys false in
                 let cont_branch = Branch.create cont_lbl [] in
                 (* Terminate *)
                 terminate (cont :: generated) (Stackless.Call {
