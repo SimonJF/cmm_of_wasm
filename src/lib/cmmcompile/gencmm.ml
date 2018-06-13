@@ -24,6 +24,9 @@ let bind_vars vs env =
 
 let nodbg = Debuginfo.none
 
+(* Recursive call depth must be bounded. We use a notion of "fuel" for this. *)
+let fuel_ident = Ident.create "FUEL"
+
 (* Trapping *)
 
 type trap_reason =
@@ -52,6 +55,14 @@ let trap reason =
   Cop (Cextcall ("wasm_rt_trap", typ_int, false, None),
     [Cconst_int (trap_id reason)], nodbg)
 
+(* Preamble: Check if we're out of fuel. If so, trap. *)
+let add_exhaustion_check func_body =
+  Cifthenelse (
+    Cop (Ccmpa Cle, [Cvar fuel_ident; Cconst_int 0], nodbg),
+    trap TrapExhaustion,
+    func_body)
+
+
 (* Compilation *)
 
 (* Cmm_of_wasm assumes a 64-bit host and target architecture. I do not intend
@@ -59,7 +70,7 @@ let trap reason =
  *
  * FIXME: We're (erroneously) treating 32-bit integers as 64-bit integers here.
  * The 64-bit integer operations can be easily solved with some bit-twiddling
- * upon loads and stores (and operation sites, in the case of division and mod.
+ * upon loads and stores (and operation sites, in the case of division and mod).
  *
  * FIXME: We're not supporting 32-bit floats yet, which are erroneously
  * compiled as 64-bit floats.
@@ -291,16 +302,17 @@ let compile_terminator env =
          * type(s) of the function, so should be prepended.
          * ...I think? *)
         let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
-        (* We'll need to do some fun with tuples to properly handle
-         * functions which return more than one value *)
-        let args_cvars = List.map (fun v -> Cvar (lv env v)) args in
+        (* Calculate new fuel *)
+        let new_fuel = Cop (Csubi, [Cvar fuel_ident; Cconst_int 1], nodbg) in
+        let args_cvars = (List.map (fun v -> Cvar (lv env v)) args) @ [new_fuel] in
+        (* Lookup function symbol from table *)
         let symbol_name = Compile_env.lookup_func_symbol func env |> Symbol.name in
         let fn_symbol = Cconst_symbol symbol_name in
         (* Cop (Capply <return type>, <args>, dbg) *)
         let br_id = Compile_env.lookup_label (Branch.label cont) env in
         let branch_args = Branch.arguments cont in
         let cont_args_cvars =
-          List.map (fun v -> Cvar (lv env v)) branch_args in
+          (List.map (fun v -> Cvar (lv env v)) branch_args) in
         (* No return values: typ_void in call, csequence, and branch args *)
         let compile_noreturn =
           let call = Cop (Capply typ_void, fn_symbol :: args_cvars, nodbg) in
@@ -374,11 +386,13 @@ let compile_function (ir_func: Stackless.func) func_md env =
       let cmm_ty = compile_type ty in
       ((ident, cmm_ty) :: acc, env)) ([], env) zipped in
   (* With updated env, compile function body *)
-  let body = compile_term env ir_func.body in
+  let body =
+    compile_term env ir_func.body
+    |> add_exhaustion_check in
   (* Finally, we can put it all together... *)
   {
     fun_name = name;
-    fun_args = List.rev args_rev;
+    fun_args = List.rev args_rev @ [(fuel_ident, typ_int)];
     fun_body = body;
     fun_codegen_options = [No_CSE];
     fun_dbg = nodbg

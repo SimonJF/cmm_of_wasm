@@ -11,9 +11,10 @@ module Refs = struct
   let output_filename = ref None
   let header_prefix_path = ref None
   let rts_path = ref None
+  let initial_fuel = ref 500
 end
 
-let options = 
+let options =
   let open Getopt in
   [ ('n', "nocgen", Some (fun () -> Refs.generate_c := false), None);
     (noshort, "dcmm", Some (fun () -> Refs.dump_cmm := true), None);
@@ -24,21 +25,26 @@ let options =
     (noshort, "cc", None, Some (fun s -> Refs.cc := s));
     ('o', nolong, None, Some (fun s -> Refs.output_filename := (Some s)));
     (noshort, "rts", None, Some (fun s -> Refs.rts_path := (Some s)));
-    (noshort, "header-prefix", None, Some (fun s -> Refs.header_prefix_path := (Some s)))
+    (noshort, "header-prefix", None, Some (fun s -> Refs.header_prefix_path := (Some s)));
+    (noshort, "fuel", None, Some (fun i -> Refs.initial_fuel := (int_of_string i)))
   ]
 
 let set_filename fn = Refs.filename := fn
 
 let print_syntax () =
-  Printf.printf "Syntax: cmm_of_wasm [-s -n -v -o <name>] [--nocgen --dstackless --dcmm --dlinear --verbose] [--cc=CC]] filename\n";
+  Printf.printf
+    "Syntax: cmm_of_wasm [-s -n -v -o <name>] \
+     [--nocgen --dstackless --dcmm --dlinear \
+     --verbose --fuel=FUEL --header-prefix=PREFIX \
+     -rts=RTS --cc=CC] filename\n";
   exit (-1)
 
 let setup () =
-  if Array.length Sys.argv <= 1 then print_syntax () else 
+  if Array.length Sys.argv <= 1 then print_syntax () else
   try
     Getopt.parse_cmdline options set_filename
    with | _ -> print_syntax ()
-    
+
 let generate_c () = !(Refs.generate_c)
 let dump_stackless () = !(Refs.dump_stackless)
 let dump_cmm () = !(Refs.dump_cmm)
@@ -50,9 +56,9 @@ let cc () = !(Refs.cc)
 let input_filename () = !(Refs.filename)
 
 let output_filename () =
-  match !(Refs.output_filename) with 
+  match !(Refs.output_filename) with
     | Some fn -> fn
-    | None -> 
+    | None ->
         Filename.basename !Refs.filename
         |> Filename.chop_extension
 
@@ -75,6 +81,8 @@ let default_rts_path =
 let rts_path () =
   match !Refs.rts_path with
     | Some fn -> fn
-    | None -> default_rts_path 
+    | None -> default_rts_path
 
 let rts_header () = Filename.concat (rts_path ()) "wasm-rt.h"
+
+let initial_fuel () = !Refs.initial_fuel

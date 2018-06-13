@@ -25,16 +25,6 @@ let string_of_ctype = function
   | F64 -> "f64"
   | Void -> "void"
 
-  (*
-let base_string_of_ctype = function
-  | U32 -> "int"
-  | U64 -> "int"
-  | F32 -> "float"
-  | F64 -> "float"
-  | Void -> "void"
-  *)
-
-
 let signature func =
   let args =
     List.map (fun (n, ty) ->
@@ -89,10 +79,10 @@ let int_registers =
      "r12"; "r13"; "r10"; "r11"; "rbp"]
 
 let float_register i =
-  if i > 15 then
+  if i > 14 then
     failwith
       ("Error: cannot generate C stubs for functions " ^
-       "with greater than 16 float arguments")
+       "with greater than 15 float arguments")
   else
     "xmm" ^ (string_of_int i)
 
@@ -126,12 +116,23 @@ let generate_cstub func =
         (name, ty, reg) :: assign_registers int_registers (float_count + 1) xs
     | _ :: _ -> assert false in
 
-  let register_map = assign_registers int_registers 0 func.args in
+  let fuel_name = "__cmmWasmFuel" in
+
+  let register_map =
+    let args = func.args @ [(fuel_name, U32)] in
+    assign_registers int_registers 0 args in
 
   let defined_registers =
     let define_register (name, ty, reg) =
+      (* Assign to given parameter, unless it's the fuel parameter,
+       * in which case assign the initial fuel value *)
+      let assignment =
+        if name = fuel_name then
+          string_of_int @@ Util.Command_line.initial_fuel ()
+        else
+          name in
       Printf.sprintf "  register %s r%s asm (\"%s\") = %s;\n"
-        (string_of_ctype ty) name reg name in
+        (string_of_ctype ty) name reg assignment in
     List.map define_register register_map
     |> String.concat "" in
 
