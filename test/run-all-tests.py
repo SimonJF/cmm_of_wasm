@@ -15,7 +15,7 @@ STDERR_NAME = "test_stderr.txt"
 disabled = [
     # Relies on floats for loop bounds in one test and thus infinite loops.
     # Remove when floats are implemented.
-     "loop.wast",
+    #  "loop.wast",
     ]
 
 

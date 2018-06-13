@@ -58,10 +58,40 @@ let trap reason =
 (* Preamble: Check if we're out of fuel. If so, trap. *)
 let add_exhaustion_check func_body =
   Cifthenelse (
-    Cop (Ccmpa Cle, [Cvar fuel_ident; Cconst_int 0], nodbg),
+    Cop (Ccmpi Cle, [Cvar fuel_ident; Cconst_int 0], nodbg),
     trap TrapExhaustion,
     func_body)
 
+
+(* Integer operations *)
+
+let sign_extend_i32 n =
+  Cop(Casr, [Cop(Clsl, [n; Cconst_int 32], nodbg); Cconst_int 32], nodbg)
+
+let unset_high_32 n =
+  Cop(Cand, [n; Cconst_natint (Nativeint.of_string "0x00000000FFFFFFFF")], nodbg)
+
+(* We perform addition, subtraction, and multiplication on 32-bit integers
+ * without sign-extending them beforehand. This is safe, because the high-
+ * bits just wrap around anyway. Nonetheless, we need to sign extend before
+ * returning or storing them. *)
+let normalise_signed ty n =
+  let open Libwasm.Types in
+  match ty with
+    | I32Type -> sign_extend_i32 n
+    | _ -> n
+
+let normalise_unsigned ty n =
+  let open Libwasm.Types in
+  match ty with
+    | I32Type -> unset_high_32 n
+    | _ -> n
+
+let normalise_function return_ty body =
+  match return_ty with
+    | [] -> body
+    | [ty] -> normalise_unsigned ty body
+    | _ -> assert false
 
 (* Compilation *)
 
@@ -85,37 +115,62 @@ let compile_value =
   | F32 x -> Cconst_float (Libwasm.F32.to_float x)
   | F64 x -> Cconst_float (Libwasm.F64.to_float x)
 
-let compile_relop =
+
+let compile_op_simple env cmmop v1 v2 =
+  let (i1, i2) = (lv env v1, lv env v2) in
+  Cop (cmmop, [Cvar i1; Cvar i2], nodbg)
+
+(* Some operations (division, modulo, comparison) require sign extension
+ * in the case of unsigned 32-bit integers. *)
+let compile_op_normalised signed env op v1 v2 =
+  let open Libwasm.Types in
+  let normalise = if signed then normalise_signed else normalise_unsigned in
+  let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
+  let _ = assert (v1ty = v2ty) in
+  let (i1, i2) = (lv env v1, lv env v2) in
+  let compile_op arg1 arg2 = Cop (op, [arg1; arg2], nodbg) in
+  match v1ty with
+    | I32Type ->
+        compile_op (normalise v1ty (Cvar i1)) (normalise v2ty (Cvar i2))
+    | _ -> compile_op (Cvar i1) (Cvar i2)
+
+
+
+
+let compile_relop env op v1 v2 =
   let open Libwasm.Ast in
   let open Libwasm.Values in
-    let compile_float_op =
-    let open Libwasm.Ast.FloatOp in
-    function
-      | Eq -> CFeq
-      | Ne -> CFneq
-      | Lt -> CFlt
-      | Gt -> CFgt
-      | Le -> CFle
-      | Ge -> CFge in
-    (* FIXME: ignoring signedness for the time being, just getting skeletons up and running *)
-    let compile_int_op =
-    let open Libwasm.Ast.IntOp in
-    function
-      | Eq -> Ceq
-      | Ne -> Cne
-      | LtS -> Clt
-      | LtU -> Clt
-      | GtS -> Cgt
-      | GtU -> Cgt
-      | LeS -> Cle
-      | LeU -> Cle
-      | GeS -> Cge
-      | GeU -> Cge in
-    function
-      | I32 i32op -> Ccmpi (compile_int_op i32op)
-      | I64 i64op -> Ccmpi (compile_int_op i64op)
-      | F32 f32op -> Ccmpf (compile_float_op f32op)(*  failwith "F32s not supported yet" *)
-      | F64 f64op -> Ccmpf (compile_float_op f64op)
+
+  let cs op = compile_op_simple env op v1 v2 in
+  let cn op b = compile_op_normalised b env op v1 v2 in
+  let compile_float_op =
+  let open Libwasm.Ast.FloatOp in
+  function
+    | Eq -> cs (Ccmpf CFeq)
+    | Ne -> cs (Ccmpf CFneq)
+    | Lt -> cs (Ccmpf CFlt)
+    | Gt -> cs (Ccmpf CFgt)
+    | Le -> cs (Ccmpf CFle)
+    | Ge -> cs (Ccmpf CFge) in
+  (* FIXME: ignoring signedness for the time being, just getting skeletons up and running *)
+  let compile_int_op =
+  let open Libwasm.Ast.IntOp in
+  function
+    | Eq -> cn (Ccmpi Ceq) false
+    | Ne -> cn (Ccmpi Cne) false
+    | LtS -> cn (Ccmpi Clt) true
+    | LtU -> cn (Ccmpi Clt) false
+    | GtS -> cn (Ccmpi Cgt) true
+    | GtU -> cn (Ccmpi Cgt) false
+    | LeS -> cn (Ccmpi Cle) true
+    | LeU -> cn (Ccmpi Cle) false
+    | GeS -> cn (Ccmpi Cge) true
+    | GeU -> cn (Ccmpi Cge) false in
+  match op with
+    | I32 i32op -> compile_int_op i32op
+    | I64 i64op -> compile_int_op i64op
+    | F32 f32op -> compile_float_op f32op
+    | F64 f64op -> compile_float_op f64op
 
 let compile_unop _ = failwith "TODO"
 
@@ -123,70 +178,87 @@ let compile_binop env op v1 v2 =
   let open Libwasm.Ast in
   let open Libwasm.Values in
 
-  let compile_simple cmmop =
+  let division_operation normalise div_f =
     let (i1, i2) = (lv env v1, lv env v2) in
-    Cop (cmmop, [Cvar i1; Cvar i2], nodbg) in
-
-  (* TODO: This only works for unsigned 64-bit integers at the moment.
-   * For unsigned 32-bit integers, we need to zero out the 32 least-significant
-   * bytes. For signed 32-bit integers, we need to sign extend to the 32 least-significant
-   * bytes. *)
-  let division_operation op =
-    let (i1, i2) = (lv env v1, lv env v2) in
+    let ty = Var.type_ v2 in
     let cmp =
-       match Var.type_ v2 with
+       match ty with
           | I32Type -> Cconst_int 0
           | I64Type -> Cconst_natint Nativeint.zero
           | _ -> assert false in
-    Cifthenelse (
-      Cop (Ccmpa Ceq, [Cvar i2 ; cmp], nodbg),
-      trap TrapDivZero,
-      Cop (Cdivi, [Cvar i1; Cvar i2], nodbg)
+    let normal_i1 = normalise ty (Cvar i1) in
+    let normal_i2 = normalise ty (Cvar i2) in
+    let norm_i1 = Ident.create "_normi1" in
+    let norm_i2 = Ident.create "_normi2" in
+    Clet (norm_i1, normal_i1,
+      Clet (norm_i2, normal_i2,
+        Cifthenelse (
+          Cop (Ccmpi Ceq, [Cvar norm_i2; cmp], nodbg),
+          trap TrapDivZero,
+          div_f norm_i1 norm_i2
+        )
+      )
     ) in
 
+  let divide signed =
+    let norm_fn = if signed then normalise_signed else normalise_unsigned in
+    division_operation
+      norm_fn
+      (fun norm_i1 norm_i2 ->
+        Cop (Cdivi, [Cvar norm_i1; Cvar norm_i2], nodbg)) in
 
-  (* FIXME: Signedness for division / modulo *)
+  (* TODO: This is likely to be inefficient :(
+   * I wonder if there's a faster way to do this with
+   * bit-twiddling... Or exposing rem in CMM? *)
+  let rem signed =
+    let norm_fn = if signed then normalise_signed else normalise_unsigned in
+    division_operation
+      norm_fn
+      (fun norm_i1 norm_i2 ->
+        Cop (Csubi, [Cvar norm_i1;
+          Cop (Cmuli, [
+            Cop (Cdivi, [Cvar norm_i1; Cvar norm_i2], nodbg);
+            Cvar norm_i2
+        ], nodbg)], nodbg)) in
+
+  let cs op = compile_op_simple env op v1 v2 in
+  let cn op signed = compile_op_normalised signed env op v1 v2 in
+
+  let min_or_max op =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    Cifthenelse (
+      Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
+      Cvar i1, Cvar i2) in
+
   let compile_int_op =
     let open Libwasm.Ast.IntOp in
     function
-    | Add -> compile_simple Caddi
-    | Sub -> compile_simple Csubi
-    | Mul -> compile_simple Cmuli
-    | DivS -> division_operation Cdivi
-    | DivU -> division_operation Cdivi
-    | RemS -> division_operation Cmodi
-    | RemU -> division_operation Cmodi
-    (* TODO: Ensure that these are actually bitwise
-     * operators and not just binary ones...*)
-    | And -> compile_simple Cand
-    | Or -> compile_simple Cor
-    | Xor -> compile_simple Cxor
-    (* TODO: Shift right operators ignore signedness right now... *)
-    | Shl -> compile_simple Clsl
-    | ShrS -> compile_simple Clsr
-    | ShrU -> compile_simple Clsr
+    | Add -> cs Caddi
+    | Sub -> cs Csubi
+    | Mul -> cs Cmuli
+    | DivS -> divide true
+    | DivU -> divide false
+    | RemS -> rem true
+    | RemU -> rem false
+    | And -> cn Cand false
+    | Or -> cn Cor false
+    | Xor -> cn Cxor false
+    | Shl -> cs Clsl
+    | ShrS -> cs Casr
+    | ShrU -> cs Clsr
     (* TODO: implement rotation *)
-    | Rotl -> compile_simple Clsl
-    | Rotr -> compile_simple Clsl in
+    | Rotl -> cs Clsl
+    | Rotr -> cs Clsl in
   let compile_float_op =
     let open Libwasm.Ast.FloatOp in
     function
-    | Add -> compile_simple Caddf
-    | Sub -> compile_simple Csubf
-    | Mul -> compile_simple Cmulf
-    | Div -> compile_simple Cdivf
-    (* These will have been checked and compiled elsewhere. *)
-    | Min ->
-        let (i1, i2) = (lv env v1, lv env v2) in
-        Cifthenelse (
-          Cop (Ccmpf CFle, [Cvar i1; Cvar i2], nodbg),
-          Cvar i1, Cvar i2)
-    | Max ->
-       let (i1, i2) = (lv env v1, lv env v2) in
-        Cifthenelse (
-          Cop (Ccmpf CFge, [Cvar i1; Cvar i2], nodbg),
-          Cvar i1, Cvar i2)
-    | CopySign -> compile_simple Caddf (* TODO: Implement (!?) *) in
+    | Add -> cs Caddf
+    | Sub -> cs Csubf
+    | Mul -> cs Cmulf
+    | Div -> cs Cdivf
+    | Min -> min_or_max CFle
+    | Max -> min_or_max CFge
+    | CopySign -> cs Caddf (* TODO: Implement (!?) *) in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
@@ -226,9 +298,7 @@ let compile_expression env =
         in
       Cop (Ccmpi Ceq, [Cvar i; cmp], nodbg)
   | Compare (rel, v1, v2) ->
-      let op = compile_relop rel in
-      let (i1, i2) = (lv env v1, lv env v2) in
-      Cop (op, [Cvar i1; Cvar i2], nodbg)
+      compile_relop env rel v1 v2
   | Unary (un, v) ->
       (* FIXME: Edited so that we can get something compiling,
        * fill this in later.
@@ -279,7 +349,7 @@ let compile_terminator env =
         Clet (lbl_id,
           Cifthenelse (
             (* Test whether index exceeds bounds *)
-            Cop (Ccmpa Cge,
+            Cop (Ccmpi Cge,
               [Cvar idx; Cconst_int (List.length es)], nodbg),
             (* If so, return the default branch *)
             Cconst_int (default_id),
@@ -377,7 +447,7 @@ let compile_function (ir_func: Stackless.func) func_md env =
     |> Symbol.name in
   (* Arguments: Need to bind each param in the env we will
    * use to compile the function, and pair with machtype *)
-  let FuncType (arg_tys, _) = Func.type_ func_md in
+  let FuncType (arg_tys, ret_tys) = Func.type_ func_md in
   let zipped =
     List.combine ir_func.params arg_tys in
   let (args_rev, env) =
@@ -388,6 +458,7 @@ let compile_function (ir_func: Stackless.func) func_md env =
   (* With updated env, compile function body *)
   let body =
     compile_term env ir_func.body
+    |> normalise_function ret_tys
     |> add_exhaustion_check in
   (* Finally, we can put it all together... *)
   {
