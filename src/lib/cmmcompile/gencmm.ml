@@ -241,22 +241,123 @@ let compile_binop env op v1 v2 =
   let shift_left =
     let (i1, i2) = (lv env v1, lv env v2) in
     let ty = Var.type_ v1 in
-    (* We have garbage in the upper 32 bits. The lower 32 may be
-     * either signed or unsigned, and we don't actually know without
-     * doing an unsigned test on whether it is greater than max_int...
-     * It's always *treated* as unsigned, since integers are only treated
-     * as signed or unsigned by operations. So, I guess it would be sound
-     * to apply the unsigned normalisation? Let's give it a shot.
-     * *)
+    (* Must normalise i2 and then get i2 % int width before doing the shift *)
     let normalised_rhs = normalise_unsigned ty (Cvar i2) in
-    let norm_i2 = Ident.create "_normi2" in
     let mod_base = if is_32 then Cconst_int 32 else Cconst_int 64 in
-    Clet (norm_i2, normalised_rhs,
-        (Cop (Clsl, ([Cvar i1;
-          Cop (Cmodi, [Cvar norm_i2; mod_base], nodbg)]), nodbg))) in
+    (Cop (Clsl, ([Cvar i1;
+      Cop (Cmodi, [normalised_rhs; mod_base], nodbg)]), nodbg)) in
+
+  (* shift_right: need to normalise LHS, and both normalise and mod RHS. *)
+  let shift_right signed =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    let ty = Var.type_ v1 in
+    (* Normalise LHS *)
+    let normalised_lhs =
+      if signed then
+        normalise_signed ty (Cvar i1)
+      else
+        normalise_unsigned ty (Cvar i1) in
+    (* Must normalise i2 and then get i2 % int width before doing the shift *)
+    let normalised_rhs = normalise_unsigned ty (Cvar i2) in
+    let mod_base = if is_32 then Cconst_int 32 else Cconst_int 64 in
+    let op = if signed then Casr else Clsr in
+    (Cop (op, ([normalised_lhs;
+      Cop (Cmodi, [normalised_rhs; mod_base], nodbg)]), nodbg)) in
+
+
+  let rotate_left_i32 =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    (*
+     * Say we have an 8-bit number, where we are ignoring the top 4 bits.
+     * Example: 0011|1101.
+     *
+     * Now, we say we want to rotate right by 2.
+     *
+     * To do this, we need to shift left by 4 to set the high bits and
+     * unset the low bits:
+     *   1101|0000
+     * and unset the original high bits.
+     *   0000|1101
+     *
+     *)
+    (* let high_set_ident = Ident.create "shl32_high_set" in
+    let high_set = Cop (Clsl, [Cvar i1; Cconst_int 32], nodbg) in
+    *)
+    let low_set_ident = Ident.create "rol32_low_set" in
+    let low_set = unset_high_32 (Cvar i1) in
+    (* Next, normalise rotate length *)
+    let distance_ident = Ident.create "dist_id" in
+    let distance =
+      Cop (Cmodi, [unset_high_32 (Cvar i2); Cconst_int 32], nodbg) in
+    (* Rotation as two shifts and an or, Hacker's delight, p.37 *)
+    (* We get junk in the high bits, but that's fine. *)
+    let shifted_l_n =
+      Cop (Clsl, [Cvar low_set_ident; Cvar distance_ident], nodbg) in
+    let shifted_r_n =
+      Cop (Clsr, [Cvar low_set_ident;
+        Cop (Csubi, [Cconst_int 32; Cvar distance_ident], nodbg)], nodbg) in
+
+    Clet (low_set_ident, low_set,
+      Clet (distance_ident, distance,
+        Cop (Cor, [shifted_l_n; shifted_r_n], nodbg))) in
+
+  (* TODO: refactor as part of i32 case, which turned out to be easier than
+   * I thought *)
+  let rotate_left_i64 =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    let distance_ident = Ident.create "dist_id" in
+    let distance =
+      Cop (Cmodi, [Cvar i2; Cconst_int 64], nodbg) in
+    (* Rotation as two shifts and an or, Hacker's delight, p.37 *)
+    (* We get junk in the high bits, but that's fine. *)
+    let shifted_l_n =
+      Cop (Clsl, [Cvar i1; Cvar distance_ident], nodbg) in
+    let shifted_r_n =
+      Cop (Clsr, [Cvar i1;
+        Cop (Csubi, [Cconst_int 64; Cvar distance_ident], nodbg)], nodbg) in
+    Clet (distance_ident, distance,
+      Cop (Cor, [shifted_l_n; shifted_r_n], nodbg)) in
+
+  (* As above. *)
+  let rotate_right_i32 =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    let low_set_ident = Ident.create "ror32_low_set" in
+    let low_set = unset_high_32 (Cvar i1) in
+    (* Next, normalise rotate length *)
+    let distance_ident = Ident.create "dist_id" in
+    let distance =
+      Cop (Cmodi, [unset_high_32 (Cvar i2); Cconst_int 32], nodbg) in
+    let shifted_r_n =
+      Cop (Clsr, [Cvar low_set_ident; Cvar distance_ident], nodbg) in
+    let shifted_l_n =
+      Cop (Clsl, [Cvar low_set_ident;
+        Cop (Csubi, [Cconst_int 32; Cvar distance_ident], nodbg)], nodbg) in
+
+    Clet (low_set_ident, low_set,
+      Clet (distance_ident, distance,
+        Cop (Cor, [shifted_l_n; shifted_r_n], nodbg))) in
+
+  let rotate_right_i64 =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    (* Next, normalise rotate length *)
+    let distance_ident = Ident.create "dist_id" in
+    let distance =
+      Cop (Cmodi, [Cvar i2; Cconst_int 64], nodbg) in
+    let shifted_r_n =
+      Cop (Clsr, [Cvar i1; Cvar distance_ident], nodbg) in
+    let shifted_l_n =
+      Cop (Clsl, [Cvar i1;
+        Cop (Csubi, [Cconst_int 64; Cvar distance_ident], nodbg)], nodbg) in
+
+    Clet (distance_ident, distance,
+      Cop (Cor, [shifted_r_n; shifted_l_n], nodbg)) in
+
+
+  let rotate_left = if is_32 then rotate_left_i32 else rotate_left_i64 in
+  let rotate_right = if is_32 then rotate_right_i32 else rotate_right_i64 in
 
   let cs op = compile_op_simple env op v1 v2 in
-  let cn op signed = compile_op_normalised signed env op v1 v2 in
+  (* let cn op signed = compile_op_normalised signed env op v1 v2 in *)
 
   let min_or_max op =
     let (i1, i2) = (lv env v1, lv env v2) in
@@ -278,11 +379,10 @@ let compile_binop env op v1 v2 =
     | Or -> cs Cor
     | Xor -> cs Cxor
     | Shl -> shift_left
-    | ShrS -> cn Casr true
-    | ShrU -> cn Clsr false
-    (* TODO: implement rotation *)
-    | Rotl -> cs Clsl
-    | Rotr -> cs Clsl in
+    | ShrS -> shift_right true
+    | ShrU -> shift_right false
+    | Rotl -> rotate_left
+    | Rotr -> rotate_right in
   let compile_float_op =
     let open Libwasm.Ast.FloatOp in
     function
@@ -312,10 +412,11 @@ let compile_unop env op v =
 
   let compile_float_op =
     let open Libwasm.Ast.FloatOp in
-    let unimplemented = Cvar (lv env v) in
+    let i = lv env v in
+    let unimplemented = Cvar i in
     function
-      | Neg -> unimplemented
-      | Abs -> unimplemented
+      | Neg -> Cop (Cnegf, [Cvar i], nodbg)
+      | Abs -> Cop (Cabsf, [Cvar i], nodbg)
       | Ceil -> unimplemented
       | Floor -> unimplemented
       | Trunc -> unimplemented
