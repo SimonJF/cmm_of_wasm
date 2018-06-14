@@ -200,24 +200,41 @@ let compile_binop env op v1 v2 =
       )
     ) in
 
-  let divide signed =
+  let divide signed is_32_bits =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
+    let div_op = if signed then Cdivi else Cdiviu in
+    let cmp_norm1 =
+      if is_32_bits then
+        Cconst_natint (Nativeint.of_string "0xFFFFFFFF80000000")
+      else
+        Cconst_natint (Nativeint.of_string "0x8000000000000000") in
+    let cmp_norm2, cmp_zero =
+      (Cconst_natint Nativeint.minus_one, Cconst_natint Nativeint.zero) in
+
     division_operation
       norm_fn
       (fun norm_i1 norm_i2 ->
-        Cop (Cdivi, [Cvar norm_i1; Cvar norm_i2], nodbg)) in
+        let div = Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg) in
+        if signed then
+          Cifthenelse (
+            Cop (Ccmpi Cne,
+              [(Cop (Cand, [
+                  Cop (Ccmpi Ceq, [Cvar norm_i1; cmp_norm1], nodbg);
+                  Cop (Ccmpi Ceq, [Cvar norm_i2; cmp_norm2], nodbg)], nodbg));
+               cmp_zero], nodbg),
+            trap TrapIntOverflow,
+            div
+        ) else div) in
 
-  (* TODO: This is likely to be inefficient :(
-   * I wonder if there's a faster way to do this with
-   * bit-twiddling... Or exposing rem in CMM? *)
   let rem signed =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
+    let div_op = if signed then Cdivi else Cdiviu in
     division_operation
       norm_fn
       (fun norm_i1 norm_i2 ->
         Cop (Csubi, [Cvar norm_i1;
           Cop (Cmuli, [
-            Cop (Cdivi, [Cvar norm_i1; Cvar norm_i2], nodbg);
+            Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg);
             Cvar norm_i2
         ], nodbg)], nodbg)) in
 
@@ -230,22 +247,22 @@ let compile_binop env op v1 v2 =
       Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
       Cvar i1, Cvar i2) in
 
-  let compile_int_op =
+  let compile_int_op is_32 =
     let open Libwasm.Ast.IntOp in
     function
     | Add -> cs Caddi
     | Sub -> cs Csubi
     | Mul -> cs Cmuli
-    | DivS -> divide true
-    | DivU -> divide false
+    | DivS -> divide true is_32
+    | DivU -> divide false is_32
     | RemS -> rem true
     | RemU -> rem false
-    | And -> cn Cand false
-    | Or -> cn Cor false
-    | Xor -> cn Cxor false
+    | And -> cs Cand
+    | Or -> cs Cor
+    | Xor -> cs Cxor
     | Shl -> cs Clsl
-    | ShrS -> cs Casr
-    | ShrU -> cs Clsr
+    | ShrS -> cn Casr true
+    | ShrU -> cn Clsr false
     (* TODO: implement rotation *)
     | Rotl -> cs Clsl
     | Rotr -> cs Clsl in
@@ -260,8 +277,8 @@ let compile_binop env op v1 v2 =
     | Max -> min_or_max CFge
     | CopySign -> cs Caddf (* TODO: Implement (!?) *) in
   match op with
-    | I32 i32op -> compile_int_op i32op
-    | I64 i64op -> compile_int_op i64op
+    | I32 i32op -> compile_int_op true i32op
+    | I64 i64op -> compile_int_op false i64op
     | F32 f32op -> compile_float_op f32op
     | F64 f64op -> compile_float_op f64op
 
