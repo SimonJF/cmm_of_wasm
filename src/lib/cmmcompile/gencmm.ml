@@ -172,11 +172,10 @@ let compile_relop env op v1 v2 =
     | F32 f32op -> compile_float_op f32op
     | F64 f64op -> compile_float_op f64op
 
-let compile_unop _ = failwith "TODO"
-
 let compile_binop env op v1 v2 =
   let open Libwasm.Ast in
   let open Libwasm.Values in
+  let is_32 = match Var.type_ v1 with | I32Type -> true | _ -> false in
 
   let division_operation normalise div_f =
     let (i1, i2) = (lv env v1, lv env v2) in
@@ -200,11 +199,11 @@ let compile_binop env op v1 v2 =
       )
     ) in
 
-  let divide signed is_32_bits =
+  let divide signed =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
     let div_op = if signed then Cdivi else Cdiviu in
     let cmp_norm1 =
-      if is_32_bits then
+      if is_32 then
         Cconst_natint (Nativeint.of_string "0xFFFFFFFF80000000")
       else
         Cconst_natint (Nativeint.of_string "0x8000000000000000") in
@@ -238,6 +237,24 @@ let compile_binop env op v1 v2 =
             Cvar norm_i2
         ], nodbg)], nodbg)) in
 
+  (* shift_left: need to normalise and mod RHS, but not LHS *)
+  let shift_left =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    let ty = Var.type_ v1 in
+    (* We have garbage in the upper 32 bits. The lower 32 may be
+     * either signed or unsigned, and we don't actually know without
+     * doing an unsigned test on whether it is greater than max_int...
+     * It's always *treated* as unsigned, since integers are only treated
+     * as signed or unsigned by operations. So, I guess it would be sound
+     * to apply the unsigned normalisation? Let's give it a shot.
+     * *)
+    let normalised_rhs = normalise_unsigned ty (Cvar i2) in
+    let norm_i2 = Ident.create "_normi2" in
+    let mod_base = if is_32 then Cconst_int 32 else Cconst_int 64 in
+    Clet (norm_i2, normalised_rhs,
+        (Cop (Clsl, ([Cvar i1;
+          Cop (Cmodi, [Cvar norm_i2; mod_base], nodbg)]), nodbg))) in
+
   let cs op = compile_op_simple env op v1 v2 in
   let cn op signed = compile_op_normalised signed env op v1 v2 in
 
@@ -247,20 +264,20 @@ let compile_binop env op v1 v2 =
       Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
       Cvar i1, Cvar i2) in
 
-  let compile_int_op is_32 =
+  let compile_int_op =
     let open Libwasm.Ast.IntOp in
     function
     | Add -> cs Caddi
     | Sub -> cs Csubi
     | Mul -> cs Cmuli
-    | DivS -> divide true is_32
-    | DivU -> divide false is_32
+    | DivS -> divide true
+    | DivU -> divide false
     | RemS -> rem true
     | RemU -> rem false
     | And -> cs Cand
     | Or -> cs Cor
     | Xor -> cs Cxor
-    | Shl -> cs Clsl
+    | Shl -> shift_left
     | ShrS -> cn Casr true
     | ShrU -> cn Clsr false
     (* TODO: implement rotation *)
@@ -277,8 +294,37 @@ let compile_binop env op v1 v2 =
     | Max -> min_or_max CFge
     | CopySign -> cs Caddf (* TODO: Implement (!?) *) in
   match op with
-    | I32 i32op -> compile_int_op true i32op
-    | I64 i64op -> compile_int_op false i64op
+    | I32 i32op -> compile_int_op i32op
+    | I64 i64op -> compile_int_op i64op
+    | F32 f32op -> compile_float_op f32op
+    | F64 f64op -> compile_float_op f64op
+
+let compile_unop env op v =
+  let open Libwasm.Values in
+
+  let compile_int_op =
+    let open Libwasm.Ast.IntOp in
+    let unimplemented = Cvar (lv env v) in
+    function
+      | Clz -> unimplemented
+      | Ctz -> unimplemented
+      | Popcnt -> unimplemented in
+
+  let compile_float_op =
+    let open Libwasm.Ast.FloatOp in
+    let unimplemented = Cvar (lv env v) in
+    function
+      | Neg -> unimplemented
+      | Abs -> unimplemented
+      | Ceil -> unimplemented
+      | Floor -> unimplemented
+      | Trunc -> unimplemented
+      | Nearest -> unimplemented
+      | Sqrt -> unimplemented in
+
+  match op with
+    | I32 i32op -> compile_int_op i32op
+    | I64 i64op -> compile_int_op i64op
     | F32 f32op -> compile_float_op f32op
     | F64 f64op -> compile_float_op f64op
 
@@ -317,12 +363,7 @@ let compile_expression env =
   | Compare (rel, v1, v2) ->
       compile_relop env rel v1 v2
   | Unary (un, v) ->
-      (* FIXME: Edited so that we can get something compiling,
-       * fill this in later.
-      let op = compile_unop un in
-      Cop (op, [Cvar (lv env v)], nodbg)
-      *)
-      Cvar (lv env v)
+      compile_unop env un v
   | Binary (bin, v1, v2) ->
       compile_binop env bin v1 v2
   | Convert (cvt, v) ->
