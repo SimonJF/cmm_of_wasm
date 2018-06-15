@@ -152,20 +152,19 @@ let compile_relop env op v1 v2 =
     | Gt -> cs (Ccmpf CFgt)
     | Le -> cs (Ccmpf CFle)
     | Ge -> cs (Ccmpf CFge) in
-  (* FIXME: ignoring signedness for the time being, just getting skeletons up and running *)
   let compile_int_op =
   let open Libwasm.Ast.IntOp in
   function
     | Eq -> cn (Ccmpi Ceq) false
     | Ne -> cn (Ccmpi Cne) false
     | LtS -> cn (Ccmpi Clt) true
-    | LtU -> cn (Ccmpi Clt) false
+    | LtU -> cn (Ccmpa Clt) false
     | GtS -> cn (Ccmpi Cgt) true
-    | GtU -> cn (Ccmpi Cgt) false
+    | GtU -> cn (Ccmpa Cgt) false
     | LeS -> cn (Ccmpi Cle) true
-    | LeU -> cn (Ccmpi Cle) false
+    | LeU -> cn (Ccmpa Cle) false
     | GeS -> cn (Ccmpi Cge) true
-    | GeU -> cn (Ccmpi Cge) false in
+    | GeU -> cn (Ccmpa Cge) false in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
