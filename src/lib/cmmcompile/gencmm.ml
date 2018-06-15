@@ -199,9 +199,7 @@ let compile_binop env op v1 v2 =
       )
     ) in
 
-  let divide signed =
-    let norm_fn = if signed then normalise_signed else normalise_unsigned in
-    let div_op = if signed then Cdivi else Cdiviu in
+  let div_overflow_check signed norm_i1 norm_i2 operation overflow =
     let cmp_norm1 =
       if is_32 then
         Cconst_natint (Nativeint.of_string "0xFFFFFFFF80000000")
@@ -209,21 +207,28 @@ let compile_binop env op v1 v2 =
         Cconst_natint (Nativeint.of_string "0x8000000000000000") in
     let cmp_norm2, cmp_zero =
       (Cconst_natint Nativeint.minus_one, Cconst_natint Nativeint.zero) in
+    if signed then
+      Cifthenelse (
+        Cop (Ccmpi Cne,
+          [(Cop (Cand, [
+              Cop (Ccmpi Ceq, [Cvar norm_i1; cmp_norm1], nodbg);
+              Cop (Ccmpi Ceq, [Cvar norm_i2; cmp_norm2], nodbg)], nodbg));
+           cmp_zero], nodbg),
+        overflow,
+        operation)
+    else
+      operation in
+
+
+  let divide signed =
+    let norm_fn = if signed then normalise_signed else normalise_unsigned in
+    let div_op = if signed then Cdivi else Cdiviu in
 
     division_operation
       norm_fn
       (fun norm_i1 norm_i2 ->
         let div = Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg) in
-        if signed then
-          Cifthenelse (
-            Cop (Ccmpi Cne,
-              [(Cop (Cand, [
-                  Cop (Ccmpi Ceq, [Cvar norm_i1; cmp_norm1], nodbg);
-                  Cop (Ccmpi Ceq, [Cvar norm_i2; cmp_norm2], nodbg)], nodbg));
-               cmp_zero], nodbg),
-            trap TrapIntOverflow,
-            div
-        ) else div) in
+        div_overflow_check signed norm_i1 norm_i2 div (trap TrapIntOverflow)) in
 
   let rem signed =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
@@ -231,11 +236,12 @@ let compile_binop env op v1 v2 =
     division_operation
       norm_fn
       (fun norm_i1 norm_i2 ->
-        Cop (Csubi, [Cvar norm_i1;
-          Cop (Cmuli, [
-            Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg);
-            Cvar norm_i2
-        ], nodbg)], nodbg)) in
+        let op =
+          Cop (Csubi, [Cvar norm_i1;
+            Cop (Cmuli, [
+              Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg);
+              Cvar norm_i2], nodbg)], nodbg) in
+        div_overflow_check signed norm_i1 norm_i2 op (Cconst_int 0)) in
 
   (* shift_left: need to normalise and mod RHS, but not LHS *)
   let shift_left =
