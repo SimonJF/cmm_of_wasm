@@ -402,13 +402,30 @@ let compile_binop env op v1 v2 =
 let compile_unop env op v =
   let open Libwasm.Values in
 
-  let compile_int_op =
+  let compile_int32_op =
     let open Libwasm.Ast.IntOp in
-    let unimplemented = Cvar (lv env v) in
+    let arg = Cvar (lv env v) in
+    let call name = Cextcall (name, typ_int, false, None) in
     function
-      | Clz -> unimplemented
-      | Ctz -> unimplemented
-      | Popcnt -> unimplemented in
+      | Clz ->
+          Cop (call "wasm_rt_clz_u32", [arg], nodbg)
+      | Ctz ->
+          Cop (call "wasm_rt_ctz_u32", [arg], nodbg)
+      | Popcnt ->
+          Cop (call "wasm_rt_popcount_u32", [arg], nodbg) in
+
+  let compile_int64_op =
+    let open Libwasm.Ast.IntOp in
+    let arg = Cvar (lv env v) in
+    let call name = Cextcall (name, typ_int, false, None) in
+    function
+      | Clz ->
+          Cop (call "wasm_rt_clz_u64", [arg], nodbg)
+      | Ctz ->
+          Cop (call "wasm_rt_ctz_u64", [arg], nodbg)
+      | Popcnt ->
+          Cop (call "wasm_rt_popcount_u64", [arg], nodbg) in
+
 
   let compile_float_op =
     let open Libwasm.Ast.FloatOp in
@@ -424,8 +441,8 @@ let compile_unop env op v =
       | Sqrt -> unimplemented in
 
   match op with
-    | I32 i32op -> compile_int_op i32op
-    | I64 i64op -> compile_int_op i64op
+    | I32 i32op -> compile_int32_op i32op
+    | I64 i64op -> compile_int64_op i64op
     | F32 f32op -> compile_float_op f32op
     | F64 f64op -> compile_float_op f64op
 

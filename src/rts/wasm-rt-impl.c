@@ -116,3 +116,44 @@ void wasm_rt_allocate_table(wasm_rt_table_t* table,
   table->max_size = max_elements;
   table->data = calloc(table->size, sizeof(wasm_rt_elem_t));
 }
+
+
+/* Primitives not provided by CMM that we're implementing as part of the
+ * RTS. Hopefully this section will shrink with time. */
+
+u32 wasm_rt_popcount_u32(u32 i) {
+  return __builtin_popcount(i);
+}
+
+u64 wasm_rt_popcount_u64(u64 i) {
+  return __builtin_popcountll(i);
+}
+
+u32 wasm_rt_clz_u32(u32 i) {
+  if (i == 0) {
+    return 32;
+  }
+  return __builtin_clz(i);
+}
+
+u64 wasm_rt_clz_u64(u64 i) {
+  if (i == 0) {
+    return 64;
+  }
+  return __builtin_clzll(i);
+}
+
+u32 wasm_rt_ctz_u32(u32 i) {
+  if (i == 0) {
+    return 32;
+  }
+  return __builtin_ctz(i);
+}
+
+u64 wasm_rt_ctz_u64(u64 i) {
+  if (i == 0) {
+    return 64;
+  }
+  return __builtin_ctzll(i);
+}
+

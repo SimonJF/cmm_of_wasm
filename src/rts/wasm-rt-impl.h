@@ -18,6 +18,7 @@
 #define WASM_RT_IMPL_H_
 
 #include <setjmp.h>
+#include <stdint.h>
 
 #include "wasm-rt.h"
 
@@ -45,8 +46,27 @@ extern jmp_buf g_jmp_buf;
  */
 #define wasm_rt_impl_try() setjmp(g_jmp_buf)
 
+
+typedef uint8_t u8;
+typedef int8_t s8;
+typedef uint16_t u16;
+typedef int16_t s16;
+typedef uint32_t u32;
+typedef int32_t s32;
+typedef uint64_t u64;
+typedef int64_t s64;
+typedef float f32;
+typedef double f64;
+
+u32 wasm_rt_popcount_u32(u32 i);
+u64 wasm_rt_popcount_u64(u64 i);
+u32 wasm_rt_clz_u32(u32 i);
+u64 wasm_rt_clz_u64(u64 i);
+u32 wasm_rt_ctz_u32(u32 i);
+u64 wasm_rt_ctz_u64(u64 i);
+
+
 #ifdef __cplusplus
 }
 #endif
-
 #endif // WASM_RT_IMPL_H_
