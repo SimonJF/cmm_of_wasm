@@ -98,10 +98,6 @@ let normalise_function return_ty body =
 (* Cmm_of_wasm assumes a 64-bit host and target architecture. I do not intend
  * to support 32-bit architectures any time soon.
  *
- * FIXME: We're (erroneously) treating 32-bit integers as 64-bit integers here.
- * The 64-bit integer operations can be easily solved with some bit-twiddling
- * upon loads and stores (and operation sites, in the case of division and mod).
- *
  * FIXME: We're not supporting 32-bit floats yet, which are erroneously
  * compiled as 64-bit floats.
  * This needs more thought.
@@ -364,11 +360,23 @@ let compile_binop env op v1 v2 =
   let cs op = compile_op_simple env op v1 v2 in
   (* let cn op signed = compile_op_normalised signed env op v1 v2 in *)
 
-  let min_or_max op =
+  let min_or_max  op =
     let (i1, i2) = (lv env v1, lv env v2) in
+    (* Check whether either operand is a NaN *)
+    (* It so turns out that Pervasives.nan ain't good enough. *)
+    let wasm_nan =
+      Cconst_float (Libwasm.F64.pos_nan |> Libwasm.F64.to_float) in
+    let is_nan x  =
+      Cop (
+        Ccmpf CFneq, [x ; x],
+        nodbg
+      ) in
     Cifthenelse (
-      Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
-      Cvar i1, Cvar i2) in
+      Cop (Cor, [is_nan (Cvar i1); is_nan (Cvar i2)], nodbg),
+      wasm_nan,
+        Cifthenelse (
+          Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
+          Cvar i1, Cvar i2)) in
 
   let compile_int_op =
     let open Libwasm.Ast.IntOp in
@@ -395,8 +403,8 @@ let compile_binop env op v1 v2 =
     | Sub -> cs Csubf
     | Mul -> cs Cmulf
     | Div -> cs Cdivf
-    | Min -> min_or_max CFle
-    | Max -> min_or_max CFge
+    | Min -> min_or_max CFlt
+    | Max -> min_or_max CFgt
     | CopySign -> cs Caddf (* TODO: Implement (!?) *) in
   match op with
     | I32 i32op -> compile_int_op i32op
@@ -439,11 +447,11 @@ let compile_unop env op v =
     function
       | Neg -> Cop (Cnegf, [Cvar i], nodbg)
       | Abs -> Cop (Cabsf, [Cvar i], nodbg)
-      | Ceil -> unimplemented
-      | Floor -> unimplemented
+      | Ceil -> Cop (Cextcall ("ceil", typ_float, false, None), [Cvar i], nodbg)
+      | Floor -> Cop (Cextcall ("floor", typ_float, false, None), [Cvar i], nodbg)
       | Trunc -> unimplemented
       | Nearest -> unimplemented
-      | Sqrt -> unimplemented in
+      | Sqrt -> Cop (Cextcall ("sqrt", typ_float, false, None), [Cvar i], nodbg) in
 
   match op with
     | I32 i32op -> compile_int32_op i32op
