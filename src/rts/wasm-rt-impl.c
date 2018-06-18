@@ -21,6 +21,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
 
 #define PAGE_SIZE 65536
 
@@ -157,3 +159,27 @@ u64 wasm_rt_ctz_u64(u64 i) {
   return __builtin_ctzll(i);
 }
 
+f64 wasm_rt_nearest_f64(f64 f) {
+  if (f > -1.0 && f < 0.0) {
+    return -0.0;
+  } else if (f > 0.0 && f < 1.0) {
+    return 0.0;
+  } else {
+    return round(f);
+  }
+}
+
+/* This is *hideous*. */
+f64 wasm_rt_zero_min_f64(f64 f1, f64 f2) {
+  if (signbit(f1) != signbit(f2)) {
+    return -0.0;
+  }
+  return (f1 <= f2 ? f1 : f2);
+}
+
+f64 wasm_rt_zero_max_f64(f64 f1, f64 f2) {
+  if (signbit(f1) != signbit(f2)) {
+    return 0.0;
+  }
+  return (f1 <= f2 ? f2 : f1);
+}

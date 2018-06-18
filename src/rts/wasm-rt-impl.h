@@ -65,6 +65,16 @@ u64 wasm_rt_clz_u64(u64 i);
 u32 wasm_rt_ctz_u32(u32 i);
 u64 wasm_rt_ctz_u64(u64 i);
 
+f64 wasm_rt_nearest_f64(f64 f);
+
+// HACK: OCaml doesn't support non-val symbols yet, so
+// we're having to encode this as a call...
+
+//const f64 wasm_rt_negative_zero_f64 = 0x8000000000000000L;
+
+f64 wasm_rt_negative_zero_f64(void);
+f64 wasm_rt_zero_min_f64(f64 f1, f64 f2);
+f64 wasm_rt_zero_max_f64(f64 f1, f64 f2);
 
 #ifdef __cplusplus
 }

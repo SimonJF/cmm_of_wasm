@@ -360,8 +360,9 @@ let compile_binop env op v1 v2 =
   let cs op = compile_op_simple env op v1 v2 in
   (* let cn op signed = compile_op_normalised signed env op v1 v2 in *)
 
-  let min_or_max  op =
+  let min_or_max is_min =
     let (i1, i2) = (lv env v1, lv env v2) in
+    let op = if is_min then CFle else CFge in
     (* Check whether either operand is a NaN *)
     (* It so turns out that Pervasives.nan ain't good enough. *)
     let wasm_nan =
@@ -371,12 +372,30 @@ let compile_binop env op v1 v2 =
         Ccmpf CFneq, [x ; x],
         nodbg
       ) in
+
+    let float_eq f1 f2 =
+      Cop (Ccmpf CFeq, [f1 ; f2], nodbg) in
+
+    let float_eq_zero f = float_eq f (Cconst_float 0.0) in
+
+    (* Check if both are zeros *)
     Cifthenelse (
-      Cop (Cor, [is_nan (Cvar i1); is_nan (Cvar i2)], nodbg),
-      wasm_nan,
+      Cop (Cand, [float_eq_zero (Cvar i1); float_eq_zero (Cvar i2)], nodbg),
+      (* TODO: I really can't do better than this at the moment. The WASM spec requires
+       * us to check the sign bit properly when comparing zeros, and there's no easy way
+       * to do so from CMM that I can see. *)
+      (if is_min then
+        Cop (Cextcall ("wasm_rt_zero_min_f64", typ_float, false, None), [], nodbg)
+       else
+        Cop (Cextcall ("wasm_rt_zero_max_f64", typ_float, false, None), [], nodbg)),
+
+      (* Check NaN special case *)
+      Cifthenelse (
+        Cop (Cor, [is_nan (Cvar i1); is_nan (Cvar i2)], nodbg),
+        wasm_nan,
         Cifthenelse (
-          Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
-          Cvar i1, Cvar i2)) in
+            Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
+            Cvar i1, Cvar i2))) in
 
   let compile_int_op =
     let open Libwasm.Ast.IntOp in
@@ -403,8 +422,8 @@ let compile_binop env op v1 v2 =
     | Sub -> cs Csubf
     | Mul -> cs Cmulf
     | Div -> cs Cdivf
-    | Min -> min_or_max CFlt
-    | Max -> min_or_max CFgt
+    | Min -> min_or_max true
+    | Max -> min_or_max false
     | CopySign -> cs Caddf (* TODO: Implement (!?) *) in
   match op with
     | I32 i32op -> compile_int_op i32op
@@ -449,8 +468,12 @@ let compile_unop env op v =
       | Abs -> Cop (Cabsf, [Cvar i], nodbg)
       | Ceil -> Cop (Cextcall ("ceil", typ_float, false, None), [Cvar i], nodbg)
       | Floor -> Cop (Cextcall ("floor", typ_float, false, None), [Cvar i], nodbg)
-      | Trunc -> unimplemented
-      | Nearest -> unimplemented
+      | Trunc -> Cop (Cextcall ("trunc", typ_float, false, None), [Cvar i], nodbg)
+      | Nearest ->
+          (* Nearest is *frustratingly close* to C's round function, but alas special-cases
+           * the numbers between -1 and 0, and 0 and 1. Since we have to do a C call to
+           * rount anyway, it's easiest to just implement nearest in our RTS. *)
+          Cop (Cextcall ("wasm_rt_nearest_f64", typ_float, false, None), [Cvar i], nodbg)
       | Sqrt -> Cop (Cextcall ("sqrt", typ_float, false, None), [Cvar i], nodbg) in
 
   match op with
