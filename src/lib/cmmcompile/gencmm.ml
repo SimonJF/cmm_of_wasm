@@ -71,6 +71,9 @@ let sign_extend_i32 n =
 let unset_high_32 n =
   Cop(Cand, [n; Cconst_natint (Nativeint.of_string "0x00000000FFFFFFFF")], nodbg)
 
+let f32_of_f64 x = Cop (Cf32off64, [x], nodbg)
+let f64_of_f32 x = Cop (Cf64off32, [x], nodbg)
+
 (* We perform addition, subtraction, and multiplication on 32-bit integers
  * without sign-extending them beforehand. This is safe, because the high-
  * bits just wrap around anyway. Nonetheless, we need to sign extend before
@@ -81,11 +84,11 @@ let normalise_signed ty n =
     | I32Type -> sign_extend_i32 n
     | _ -> n
 
-let normalise_unsigned ty n =
+let normalise_unsigned ty x =
   let open Libwasm.Types in
   match ty with
-    | I32Type -> unset_high_32 n
-    | _ -> n
+    | I32Type -> unset_high_32 x
+    | _ -> x
 
 let normalise_function return_ty body =
   match return_ty with
@@ -108,13 +111,20 @@ let compile_value =
   | I32 x -> Cconst_int (Int32.to_int x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
   (* TODO: Float support *)
-  | F32 x -> Cconst_float (Libwasm.F32.to_float x)
+  | F32 x ->
+      f32_of_f64 (
+        Cconst_float (Libwasm.F64_convert.promote_f32 x |> Libwasm.F64.to_float))
   | F64 x -> Cconst_float (Libwasm.F64.to_float x)
 
 
 let compile_op_simple env cmmop v1 v2 =
   let (i1, i2) = (lv env v1, lv env v2) in
   Cop (cmmop, [Cvar i1; Cvar i2], nodbg)
+
+let compile_f32_op env cmmop v1 v2 =
+  let (i1, i2) = (lv env v1, lv env v2) in
+  f32_of_f64 (Cop (cmmop, [f64_of_f32 (Cvar i1); f64_of_f32 (Cvar i2)], nodbg))
+
 
 (* Some operations (division, modulo, comparison) require sign extension
  * in the case of unsigned 32-bit integers. *)
@@ -139,6 +149,7 @@ let compile_relop env op v1 v2 =
 
   let cs op = compile_op_simple env op v1 v2 in
   let cn op b = compile_op_normalised b env op v1 v2 in
+
   let compile_float_op =
   let open Libwasm.Ast.FloatOp in
   function
@@ -358,15 +369,26 @@ let compile_binop env op v1 v2 =
   let rotate_right = if is_32 then rotate_right_i32 else rotate_right_i64 in
 
   let cs op = compile_op_simple env op v1 v2 in
+  let cf32 op = compile_f32_op env op v1 v2 in
   (* let cn op signed = compile_op_normalised signed env op v1 v2 in *)
 
-  let min_or_max is_min =
+  let min_or_max ~is_f32 ~is_min =
     let (i1, i2) = (lv env v1, lv env v2) in
     let op = if is_min then CFle else CFge in
+    let arg_f =
+      if is_f32 then f64_of_f32 else (fun x -> x) in
+    let result_f =
+      if is_f32 then f32_of_f64 else (fun x -> x) in
+    let zero_min_f =
+      "wasm_rt_zero_min_" ^ (if is_f32 then "f32" else "f64") in
+    let zero_max_f =
+      "wasm_rt_zero_max_" ^ (if is_f32 then "f32" else "f64") in
+
     (* Check whether either operand is a NaN *)
     (* It so turns out that Pervasives.nan ain't good enough. *)
     let wasm_nan =
-      Cconst_float (Libwasm.F64.pos_nan |> Libwasm.F64.to_float) in
+        result_f @@ Cconst_float (Libwasm.F64.pos_nan |> Libwasm.F64.to_float) in
+
     let is_nan x  =
       Cop (
         Ccmpf CFneq, [x ; x],
@@ -379,22 +401,21 @@ let compile_binop env op v1 v2 =
     let float_eq_zero f = float_eq f (Cconst_float 0.0) in
 
     (* Check if both are zeros *)
+    (* Check NaN special case *)
     Cifthenelse (
-      Cop (Cand, [float_eq_zero (Cvar i1); float_eq_zero (Cvar i2)], nodbg),
-      (* TODO: I really can't do better than this at the moment. The WASM spec requires
-       * us to check the sign bit properly when comparing zeros, and there's no easy way
-       * to do so from CMM that I can see. *)
-      (if is_min then
-        Cop (Cextcall ("wasm_rt_zero_min_f64", typ_float, false, None), [], nodbg)
-       else
-        Cop (Cextcall ("wasm_rt_zero_max_f64", typ_float, false, None), [], nodbg)),
-
-      (* Check NaN special case *)
+      Cop (Cor, [is_nan (Cvar i1); is_nan (Cvar i2)], nodbg),
+      wasm_nan,
       Cifthenelse (
-        Cop (Cor, [is_nan (Cvar i1); is_nan (Cvar i2)], nodbg),
-        wasm_nan,
+        Cop (Cand, [float_eq_zero (Cvar i1); float_eq_zero (Cvar i2)], nodbg),
+          (* TODO: I really can't do better than this at the moment. The WASM spec requires
+           * us to check the sign bit properly when comparing zeros, and there's no easy way
+           * to do so from CMM that I can see. *)
+          (if is_min then
+            Cop (Cextcall (zero_min_f, typ_float, false, None), [], nodbg)
+           else
+            Cop (Cextcall (zero_max_f, typ_float, false, None), [], nodbg)),
         Cifthenelse (
-            Cop (Ccmpf op, [Cvar i1; Cvar i2], nodbg),
+            Cop (Ccmpf op, [arg_f @@ Cvar i1; arg_f @@ Cvar i2], nodbg),
             Cvar i1, Cvar i2))) in
 
   let compile_int_op =
@@ -422,13 +443,24 @@ let compile_binop env op v1 v2 =
     | Sub -> cs Csubf
     | Mul -> cs Cmulf
     | Div -> cs Cdivf
-    | Min -> min_or_max true
-    | Max -> min_or_max false
+    | Min -> min_or_max ~is_f32:false ~is_min:true
+    | Max -> min_or_max ~is_f32:false ~is_min:false
     | CopySign -> cs Caddf (* TODO: Implement (!?) *) in
+  let compile_float32_op =
+    let open Libwasm.Ast.FloatOp in
+    let unimplemented = cs Caddf in
+    function
+    | Add -> cf32 Caddf
+    | Sub -> cf32 Csubf
+    | Mul -> cf32 Cmulf
+    | Div -> cf32 Cdivf
+    | Min -> min_or_max ~is_f32:true ~is_min:true
+    | Max -> min_or_max ~is_f32:true ~is_min:false
+    | CopySign -> unimplemented in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
-    | F32 f32op -> compile_float_op f32op
+    | F32 f32op -> compile_float32_op f32op
     | F64 f64op -> compile_float_op f64op
 
 let compile_unop env op v =
@@ -458,29 +490,31 @@ let compile_unop env op v =
       | Popcnt ->
           Cop (call "wasm_rt_popcount_u64", [arg], nodbg) in
 
-
-  let compile_float_op =
+  let compile_float_op arg_f result_f =
     let open Libwasm.Ast.FloatOp in
     let i = lv env v in
-    let unimplemented = Cvar i in
     function
-      | Neg -> Cop (Cnegf, [Cvar i], nodbg)
-      | Abs -> Cop (Cabsf, [Cvar i], nodbg)
-      | Ceil -> Cop (Cextcall ("ceil", typ_float, false, None), [Cvar i], nodbg)
-      | Floor -> Cop (Cextcall ("floor", typ_float, false, None), [Cvar i], nodbg)
-      | Trunc -> Cop (Cextcall ("trunc", typ_float, false, None), [Cvar i], nodbg)
+      | Neg -> result_f @@ Cop (Cnegf, [arg_f @@ Cvar i], nodbg)
+      | Abs -> result_f @@ Cop (Cabsf, [arg_f @@ Cvar i], nodbg)
+      | Ceil -> result_f @@ Cop (Cextcall ("ceil", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
+      | Floor -> result_f @@ Cop (Cextcall ("floor", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
+      | Trunc -> result_f @@ Cop (Cextcall ("trunc", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
       | Nearest ->
           (* Nearest is *frustratingly close* to C's round function, but alas special-cases
            * the numbers between -1 and 0, and 0 and 1. Since we have to do a C call to
            * rount anyway, it's easiest to just implement nearest in our RTS. *)
-          Cop (Cextcall ("wasm_rt_nearest_f64", typ_float, false, None), [Cvar i], nodbg)
-      | Sqrt -> Cop (Cextcall ("sqrt", typ_float, false, None), [Cvar i], nodbg) in
+          result_f @@ Cop (Cextcall ("wasm_rt_nearest_f64", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
+      | Sqrt ->
+          result_f @@ Cop (Cextcall ("sqrt", typ_float, false, None), [arg_f @@ Cvar i], nodbg) in
+
+  let compile_float64_op = compile_float_op (fun x -> x) (fun x -> x) in
+  let compile_float32_op = compile_float_op f64_of_f32 f32_of_f64 in
 
   match op with
     | I32 i32op -> compile_int32_op i32op
     | I64 i64op -> compile_int64_op i64op
-    | F32 f32op -> compile_float_op f32op
-    | F64 f64op -> compile_float_op f64op
+    | F32 f32op -> compile_float32_op f32op
+    | F64 f64op -> compile_float64_op f64op
 
 let compile_cvtop _ = failwith "Conversion operators not done yet"
 

@@ -72,7 +72,9 @@ f64 wasm_rt_nearest_f64(f64 f);
 
 //const f64 wasm_rt_negative_zero_f64 = 0x8000000000000000L;
 
-f64 wasm_rt_negative_zero_f64(void);
+f32 wasm_rt_zero_min_f32(f32 f1, f32 f2);
+f32 wasm_rt_zero_max_f32(f32 f1, f32 f2);
+
 f64 wasm_rt_zero_min_f64(f64 f1, f64 f2);
 f64 wasm_rt_zero_max_f64(f64 f1, f64 f2);
 
