@@ -277,92 +277,64 @@ let compile_binop env op v1 v2 =
       Cop (Cmodi, [normalised_rhs; mod_base], nodbg)]), nodbg)) in
 
 
+  (* Rotation as two shifts and an or, Hacker's delight, p.37 *)
+  (* We get junk in the high bits in the i32 case, but that's fine. *)
+  let rotate is_left to_shift distance width =
+    let (op1, op2) =
+      if is_left then (Clsl, Clsr) else (Clsr, Clsl) in
+    let shifted_l_n =
+      Cop (op1, [to_shift; distance], nodbg) in
+    let shifted_r_n =
+      Cop (op2, [to_shift;
+        Cop (Csubi, [Cconst_int width; distance], nodbg)], nodbg) in
+    Cop (Cor, [shifted_l_n; shifted_r_n], nodbg) in
+
+  let rotate_left = rotate true in
+  let rotate_right = rotate false in
+
   let rotate_left_i32 =
     let (i1, i2) = (lv env v1, lv env v2) in
-    (*
-     * Say we have an 8-bit number, where we are ignoring the top 4 bits.
-     * Example: 0011|1101.
-     *
-     * Now, we say we want to rotate right by 2.
-     *
-     * To do this, we need to shift left by 4 to set the high bits and
-     * unset the low bits:
-     *   1101|0000
-     * and unset the original high bits.
-     *   0000|1101
-     *
-     *)
-    (* let high_set_ident = Ident.create "shl32_high_set" in
-    let high_set = Cop (Clsl, [Cvar i1; Cconst_int 32], nodbg) in
-    *)
+    let width = 32 in
     let low_set_ident = Ident.create "rol32_low_set" in
     let low_set = unset_high_32 (Cvar i1) in
     (* Next, normalise rotate length *)
     let distance_ident = Ident.create "dist_id" in
     let distance =
-      Cop (Cmodi, [unset_high_32 (Cvar i2); Cconst_int 32], nodbg) in
-    (* Rotation as two shifts and an or, Hacker's delight, p.37 *)
-    (* We get junk in the high bits, but that's fine. *)
-    let shifted_l_n =
-      Cop (Clsl, [Cvar low_set_ident; Cvar distance_ident], nodbg) in
-    let shifted_r_n =
-      Cop (Clsr, [Cvar low_set_ident;
-        Cop (Csubi, [Cconst_int 32; Cvar distance_ident], nodbg)], nodbg) in
-
+      Cop (Cmodi, [unset_high_32 (Cvar i2); Cconst_int width], nodbg) in
     Clet (low_set_ident, low_set,
       Clet (distance_ident, distance,
-        Cop (Cor, [shifted_l_n; shifted_r_n], nodbg))) in
+        rotate_left (Cvar low_set_ident) (Cvar distance_ident) width)) in
 
-  (* TODO: refactor as part of i32 case, which turned out to be easier than
-   * I thought *)
   let rotate_left_i64 =
     let (i1, i2) = (lv env v1, lv env v2) in
+    let width = 64 in
     let distance_ident = Ident.create "dist_id" in
     let distance =
       Cop (Cmodi, [Cvar i2; Cconst_int 64], nodbg) in
-    (* Rotation as two shifts and an or, Hacker's delight, p.37 *)
-    (* We get junk in the high bits, but that's fine. *)
-    let shifted_l_n =
-      Cop (Clsl, [Cvar i1; Cvar distance_ident], nodbg) in
-    let shifted_r_n =
-      Cop (Clsr, [Cvar i1;
-        Cop (Csubi, [Cconst_int 64; Cvar distance_ident], nodbg)], nodbg) in
     Clet (distance_ident, distance,
-      Cop (Cor, [shifted_l_n; shifted_r_n], nodbg)) in
+      rotate_left (Cvar i1) (Cvar distance_ident) width) in
 
-  (* As above. *)
-  let rotate_right_i32 =
+    let rotate_right_i32 =
     let (i1, i2) = (lv env v1, lv env v2) in
+    let width = 32 in
     let low_set_ident = Ident.create "ror32_low_set" in
     let low_set = unset_high_32 (Cvar i1) in
     (* Next, normalise rotate length *)
     let distance_ident = Ident.create "dist_id" in
     let distance =
       Cop (Cmodi, [unset_high_32 (Cvar i2); Cconst_int 32], nodbg) in
-    let shifted_r_n =
-      Cop (Clsr, [Cvar low_set_ident; Cvar distance_ident], nodbg) in
-    let shifted_l_n =
-      Cop (Clsl, [Cvar low_set_ident;
-        Cop (Csubi, [Cconst_int 32; Cvar distance_ident], nodbg)], nodbg) in
-
     Clet (low_set_ident, low_set,
       Clet (distance_ident, distance,
-        Cop (Cor, [shifted_l_n; shifted_r_n], nodbg))) in
+        rotate_right (Cvar low_set_ident) (Cvar distance_ident) width)) in
 
   let rotate_right_i64 =
     let (i1, i2) = (lv env v1, lv env v2) in
-    (* Next, normalise rotate length *)
+    let width = 64 in
     let distance_ident = Ident.create "dist_id" in
     let distance =
-      Cop (Cmodi, [Cvar i2; Cconst_int 64], nodbg) in
-    let shifted_r_n =
-      Cop (Clsr, [Cvar i1; Cvar distance_ident], nodbg) in
-    let shifted_l_n =
-      Cop (Clsl, [Cvar i1;
-        Cop (Csubi, [Cconst_int 64; Cvar distance_ident], nodbg)], nodbg) in
-
+      Cop (Cmodi, [Cvar i2; Cconst_int width], nodbg) in
     Clet (distance_ident, distance,
-      Cop (Cor, [shifted_r_n; shifted_l_n], nodbg)) in
+      rotate_right (Cvar i1) (Cvar distance_ident) width) in
 
 
   let rotate_left = if is_32 then rotate_left_i32 else rotate_left_i64 in
@@ -466,53 +438,41 @@ let compile_binop env op v1 v2 =
 let compile_unop env op v =
   let open Libwasm.Values in
 
-  let compile_int32_op =
+  let compile_int_op ~is_32 =
     let open Libwasm.Ast.IntOp in
     let arg = Cvar (lv env v) in
-    let call name = Cextcall (name, typ_int, false, None) in
+    let add_suffix s = s ^ (if is_32 then "_u32" else "_u64") in
+    let call name = Cextcall (add_suffix name, typ_int, false, None) in
     function
-      | Clz ->
-          Cop (call "wasm_rt_clz_u32", [arg], nodbg)
-      | Ctz ->
-          Cop (call "wasm_rt_ctz_u32", [arg], nodbg)
-      | Popcnt ->
-          Cop (call "wasm_rt_popcount_u32", [arg], nodbg) in
-
-  let compile_int64_op =
-    let open Libwasm.Ast.IntOp in
-    let arg = Cvar (lv env v) in
-    let call name = Cextcall (name, typ_int, false, None) in
-    function
-      | Clz ->
-          Cop (call "wasm_rt_clz_u64", [arg], nodbg)
-      | Ctz ->
-          Cop (call "wasm_rt_ctz_u64", [arg], nodbg)
-      | Popcnt ->
-          Cop (call "wasm_rt_popcount_u64", [arg], nodbg) in
+      | Clz -> Cop (call "wasm_rt_clz", [arg], nodbg)
+      | Ctz -> Cop (call "wasm_rt_ctz", [arg], nodbg)
+      | Popcnt -> Cop (call "wasm_rt_popcount", [arg], nodbg) in
 
   let compile_float_op arg_f result_f =
     let open Libwasm.Ast.FloatOp in
     let i = lv env v in
+    let call name =
+      Cop (Cextcall (name, typ_float, false, None), [arg_f @@ Cvar i], nodbg)
+      |> result_f in
     function
-      | Neg -> result_f @@ Cop (Cnegf, [arg_f @@ Cvar i], nodbg)
-      | Abs -> result_f @@ Cop (Cabsf, [arg_f @@ Cvar i], nodbg)
-      | Ceil -> result_f @@ Cop (Cextcall ("ceil", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
-      | Floor -> result_f @@ Cop (Cextcall ("floor", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
-      | Trunc -> result_f @@ Cop (Cextcall ("trunc", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
+      | Neg -> Cop (Cnegf, [arg_f @@ Cvar i], nodbg) |> result_f
+      | Abs -> Cop (Cabsf, [arg_f @@ Cvar i], nodbg) |> result_f
+      | Ceil -> call "ceil"
+      | Floor -> call "floor"
+      | Trunc -> call "trunc"
       | Nearest ->
           (* Nearest is *frustratingly close* to C's round function, but alas special-cases
            * the numbers between -1 and 0, and 0 and 1. Since we have to do a C call to
-           * rount anyway, it's easiest to just implement nearest in our RTS. *)
-          result_f @@ Cop (Cextcall ("wasm_rt_nearest_f64", typ_float, false, None), [arg_f @@ Cvar i], nodbg)
-      | Sqrt ->
-          result_f @@ Cop (Cextcall ("sqrt", typ_float, false, None), [arg_f @@ Cvar i], nodbg) in
+           * round anyway, it's easiest to just implement nearest in our RTS. *)
+          call "wasm_rt_nearest_f64"
+      | Sqrt -> call "sqrt" in
 
   let compile_float64_op = compile_float_op (fun x -> x) (fun x -> x) in
   let compile_float32_op = compile_float_op f64_of_f32 f32_of_f64 in
 
   match op with
-    | I32 i32op -> compile_int32_op i32op
-    | I64 i64op -> compile_int64_op i64op
+    | I32 i32op -> compile_int_op ~is_32:true i32op
+    | I64 i64op -> compile_int_op ~is_32:false i64op
     | F32 f32op -> compile_float32_op f32op
     | F64 f64op -> compile_float64_op f64op
 
