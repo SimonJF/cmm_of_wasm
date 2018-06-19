@@ -147,18 +147,24 @@ let compile_relop env op v1 v2 =
   let open Libwasm.Ast in
   let open Libwasm.Values in
 
-  let cs op = compile_op_simple env op v1 v2 in
+  let cf op ~is_32 =
+    let (i1, i2) = (lv env v1, lv env v2) in
+    if is_32 then
+      Cop (op, [f64_of_f32 @@ Cvar i1; f64_of_f32 @@ Cvar i2], nodbg)
+    else
+      Cop (op, [Cvar i1; Cvar i2], nodbg) in
+
   let cn op b = compile_op_normalised b env op v1 v2 in
 
-  let compile_float_op =
+  let compile_float_op ~is_32 =
   let open Libwasm.Ast.FloatOp in
   function
-    | Eq -> cs (Ccmpf CFeq)
-    | Ne -> cs (Ccmpf CFneq)
-    | Lt -> cs (Ccmpf CFlt)
-    | Gt -> cs (Ccmpf CFgt)
-    | Le -> cs (Ccmpf CFle)
-    | Ge -> cs (Ccmpf CFge) in
+    | Eq -> cf (Ccmpf CFeq) is_32
+    | Ne -> cf (Ccmpf CFneq) is_32
+    | Lt -> cf (Ccmpf CFlt) is_32
+    | Gt -> cf (Ccmpf CFgt) is_32
+    | Le -> cf (Ccmpf CFle) is_32
+    | Ge -> cf (Ccmpf CFge) is_32 in
   let compile_int_op =
   let open Libwasm.Ast.IntOp in
   function
@@ -175,8 +181,8 @@ let compile_relop env op v1 v2 =
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
-    | F32 f32op -> compile_float_op f32op
-    | F64 f64op -> compile_float_op f64op
+    | F32 f32op -> compile_float_op f32op ~is_32:true
+    | F64 f64op -> compile_float_op f64op ~is_32:false
 
 let compile_binop env op v1 v2 =
   let open Libwasm.Ast in
@@ -460,7 +466,7 @@ let compile_unop env op v =
       | Nearest ->
           (* Nearest is *frustratingly close* to C's round function, but alas special-cases
            * the numbers between -1 and 0, and 0 and 1. Since we have to do a C call to
-           * round anyway, it's easiest to just implement nearest in our RTS. *)
+           * round anyway, it's easiest to just implement nearest in the RTS. *)
           call "wasm_rt_nearest_f64"
       | Sqrt -> call "sqrt" in
 
