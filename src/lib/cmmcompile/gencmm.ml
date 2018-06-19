@@ -347,10 +347,10 @@ let compile_binop env op v1 v2 =
   let min_or_max ~is_f32 ~is_min =
     let (i1, i2) = (lv env v1, lv env v2) in
     let op = if is_min then CFle else CFge in
-    let arg_f =
-      if is_f32 then f64_of_f32 else (fun x -> x) in
-    let result_f =
-      if is_f32 then f32_of_f64 else (fun x -> x) in
+    let (arg_f, result_f) =
+      if is_f32 then (f64_of_f32, f32_of_f64)
+      else ((fun x -> x), (fun x -> x)) in
+
     let zero_min_f =
       "wasm_rt_zero_min_" ^ (if is_f32 then "f32" else "f64") in
     let zero_max_f =
@@ -375,17 +375,19 @@ let compile_binop env op v1 v2 =
     (* Check if both are zeros *)
     (* Check NaN special case *)
     Cifthenelse (
-      Cop (Cor, [is_nan (Cvar i1); is_nan (Cvar i2)], nodbg),
+      Cop (Cor, [is_nan (arg_f @@ Cvar i1); is_nan (arg_f @@ Cvar i2)], nodbg),
       wasm_nan,
       Cifthenelse (
-        Cop (Cand, [float_eq_zero (Cvar i1); float_eq_zero (Cvar i2)], nodbg),
-          (* TODO: I really can't do better than this at the moment. The WASM spec requires
-           * us to check the sign bit properly when comparing zeros, and there's no easy way
-           * to do so from CMM that I can see. *)
-          (if is_min then
-            Cop (Cextcall (zero_min_f, typ_float, false, None), [], nodbg)
-           else
-            Cop (Cextcall (zero_max_f, typ_float, false, None), [], nodbg)),
+        Cop (Cand, [float_eq_zero (arg_f @@ Cvar i1); float_eq_zero (arg_f @@ Cvar i2)], nodbg),
+        (* TODO: I really can't do better than this at the moment. The WASM spec requires
+         * us to check the sign bit properly when comparing zeros, and there's no easy way
+         * to do so from CMM that I can see. *)
+        begin
+          let call name =
+            Cop (Cextcall (name, typ_float, false, None),
+                [Cvar i1; Cvar i2], nodbg) in
+           if is_min then call zero_min_f else call zero_max_f
+        end,
         Cifthenelse (
             Cop (Ccmpf op, [arg_f @@ Cvar i1; arg_f @@ Cvar i2], nodbg),
             Cvar i1, Cvar i2))) in

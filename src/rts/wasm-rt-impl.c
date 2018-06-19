@@ -171,29 +171,29 @@ f64 wasm_rt_nearest_f64(f64 f) {
 
 /* This is *hideous*. */
 f32 wasm_rt_zero_min_f32(f32 f1, f32 f2) {
-  if (signbit(f1) != signbit(f2)) {
-    return -0.0;
+  if (signbit(f1)) {
+    return f1;
   }
-  return (f1 <= f2 ? f1 : f2);
+  return f2;
 }
 
 f32 wasm_rt_zero_max_f32(f32 f1, f32 f2) {
-  if (signbit(f1) != signbit(f2)) {
-    return 0.0;
+  if (signbit(f1)) {
+    return f2;
   }
-  return (f1 <= f2 ? f2 : f1);
+  return f1;
 }
 
 f64 wasm_rt_zero_min_f64(f64 f1, f64 f2) {
-  if (signbit(f1) != signbit(f2)) {
-    return -0.0;
+  if (signbit(f1)) {
+    return f1;
   }
-  return (f1 <= f2 ? f1 : f2);
+  return f2;
 }
 
 f64 wasm_rt_zero_max_f64(f64 f1, f64 f2) {
-  if (signbit(f1) != signbit(f2)) {
-    return 0.0;
+  if (signbit(f1)) {
+    return f2;
   }
-  return (f1 <= f2 ? f2 : f1);
+  return f1;
 }
