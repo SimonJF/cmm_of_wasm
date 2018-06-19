@@ -60,6 +60,7 @@ type module_ = {
     funcs : (func * Func.t) Util.Maps.Int32Map.t;
     globals: (global * Global.t) Util.Maps.Int32Map.t;
     start : Func.t option;
+    memory_metadata: Libwasm.Types.memory_type option;
     (* TODO: Fill the rest of this in *)
     exports : Libwasm.Ast.export list
 }

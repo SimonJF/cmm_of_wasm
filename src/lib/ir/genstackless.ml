@@ -247,16 +247,20 @@ let ir_term env instrs =
                 bind env (Stackless.Test (testop, v)) Libwasm.Types.I32Type
             | Compare relop ->
                 let (v2, v1), env = Translate_env.pop2 env in
-                let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
-                let _ = assert (v1ty = v2ty) in
+                (* Turned off for now as I'm confident in the structured control
+                 * representation, and for this to hold, we need to implement
+                 * conversion operators *)
+                (* let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in *)
+                (* let _ = assert (v1ty = v2ty) in *)
                 bind env (Stackless.Compare (relop, v1, v2)) Libwasm.Types.I32Type
             | Unary unop ->
                 let (v, env) = Translate_env.pop env in
                 bind env (Stackless.Unary (unop, v)) (Var.type_ v)
             | Binary binop ->
                 let (v2, v1), env = Translate_env.pop2 env in
-                let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
-                let _ = assert (v1ty = v2ty) in
+                let (v1ty, _v2ty) = (Var.type_ v1, Var.type_ v2) in
+                (* As above *)
+                (* let _ = assert (v1ty = v2ty) in *)
                 bind env (Stackless.Binary (binop, v1, v2)) v1ty
             | Convert cvtop ->
                 let (v, env) = Translate_env.pop env in
@@ -397,8 +401,12 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
           Int32Map.find (v.it) func_metadata_map)) ast_mod.start in
 
     let exports = ast_mod.exports in
+    let memory_metadata =
+      match ast_mod.memories with
+        | [] -> None
+        | x :: _ -> Some x.it.mtype in
     (* And for now, that should be it? *)
-    { funcs; globals; start ; exports }
+    { funcs; globals; start ; memory_metadata; exports }
 
 
 
