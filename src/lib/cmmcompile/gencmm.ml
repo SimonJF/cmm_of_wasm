@@ -182,9 +182,9 @@ let compile_binop env op v1 v2 =
   let open Libwasm.Ast in
   let open Libwasm.Values in
   let is_32 = match Var.type_ v1 with | I32Type -> true | _ -> false in
+  let (i1, i2) = (lv env v1, lv env v2) in
 
   let division_operation normalise div_f =
-    let (i1, i2) = (lv env v1, lv env v2) in
     let ty = Var.type_ v2 in
     let cmp =
        match ty with
@@ -251,7 +251,6 @@ let compile_binop env op v1 v2 =
 
   (* shift_left: need to normalise and mod RHS, but not LHS *)
   let shift_left =
-    let (i1, i2) = (lv env v1, lv env v2) in
     let ty = Var.type_ v1 in
     (* Must normalise i2 and then get i2 % int width before doing the shift *)
     let normalised_rhs = normalise_unsigned ty (Cvar i2) in
@@ -261,7 +260,6 @@ let compile_binop env op v1 v2 =
 
   (* shift_right: need to normalise LHS, and both normalise and mod RHS. *)
   let shift_right signed =
-    let (i1, i2) = (lv env v1, lv env v2) in
     let ty = Var.type_ v1 in
     (* Normalise LHS *)
     let normalised_lhs =
@@ -293,7 +291,6 @@ let compile_binop env op v1 v2 =
   let rotate_right = rotate false in
 
   let rotate_left_i32 =
-    let (i1, i2) = (lv env v1, lv env v2) in
     let width = 32 in
     let low_set_ident = Ident.create "rol32_low_set" in
     let low_set = unset_high_32 (Cvar i1) in
@@ -306,7 +303,6 @@ let compile_binop env op v1 v2 =
         rotate_left (Cvar low_set_ident) (Cvar distance_ident) width)) in
 
   let rotate_left_i64 =
-    let (i1, i2) = (lv env v1, lv env v2) in
     let width = 64 in
     let distance_ident = Ident.create "dist_id" in
     let distance =
@@ -315,7 +311,6 @@ let compile_binop env op v1 v2 =
       rotate_left (Cvar i1) (Cvar distance_ident) width) in
 
     let rotate_right_i32 =
-    let (i1, i2) = (lv env v1, lv env v2) in
     let width = 32 in
     let low_set_ident = Ident.create "ror32_low_set" in
     let low_set = unset_high_32 (Cvar i1) in
@@ -328,7 +323,6 @@ let compile_binop env op v1 v2 =
         rotate_right (Cvar low_set_ident) (Cvar distance_ident) width)) in
 
   let rotate_right_i64 =
-    let (i1, i2) = (lv env v1, lv env v2) in
     let width = 64 in
     let distance_ident = Ident.create "dist_id" in
     let distance =
@@ -417,10 +411,11 @@ let compile_binop env op v1 v2 =
     | Div -> cs Cdivf
     | Min -> min_or_max ~is_f32:false ~is_min:true
     | Max -> min_or_max ~is_f32:false ~is_min:false
-    | CopySign -> cs Caddf (* TODO: Implement (!?) *) in
+    | CopySign ->
+        Cop (Cextcall ("copysign", typ_float, false, None),
+          [Cvar i1; Cvar i2], nodbg) in
   let compile_float32_op =
     let open Libwasm.Ast.FloatOp in
-    let unimplemented = cs Caddf in
     function
     | Add -> cf32 Caddf
     | Sub -> cf32 Csubf
@@ -428,7 +423,9 @@ let compile_binop env op v1 v2 =
     | Div -> cf32 Cdivf
     | Min -> min_or_max ~is_f32:true ~is_min:true
     | Max -> min_or_max ~is_f32:true ~is_min:false
-    | CopySign -> unimplemented in
+    | CopySign ->
+        f32_of_f64 @@ Cop (Cextcall ("copysign", typ_float, false, None),
+          [f64_of_f32 @@ Cvar i1; f64_of_f32 @@ Cvar i2], nodbg) in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
