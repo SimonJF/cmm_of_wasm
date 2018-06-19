@@ -35,7 +35,7 @@ module Memory : sig
    * successful, and -1 otherwise. *)
   val grow :
     cmm_address ->
-    Libwasm.Memory.size ->
+    Cmm.expression (* Number of pages *) ->
     Cmm.expression
 
   val size :
