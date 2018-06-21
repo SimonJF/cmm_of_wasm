@@ -22,12 +22,14 @@ module Memory = struct
      * Nonetheless, since wasm_rt_memory_t is word-aligned, it's the
      * obvious struct encoding to use.
      *)
+    (* Root pointer: address of the memory structure *)
     let size_uint32 = 4
 
     (* CHECK: Caddi, Cadda, or Caddv? Or does it matter not? *)
     let add_ptr addr offset = Cop (Caddi, [addr; offset], nodbg)
 
-    let data_pointer root = Cop (Cload (Word_int, Mutable), [root], nodbg)
+    let data_pointer root =
+      Cop (Cload (Word_int, Mutable), [root], nodbg)
 
     let pages root =
       Cop (Cload (Thirtytwo_unsigned, Mutable),

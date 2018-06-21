@@ -347,13 +347,12 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let globals =
       List.fold_left (fun (i, acc) (glob: Ast.global) ->
         let glob = glob.it in
-        (* My understanding from the spec is that this *must*
-         * be a single value wrapped in "const"... But I may
-         * be wrong *)
+        (* This must either be an Ast.const or a global.
+         * Until we get globals going properly, assume it's a const *)
         let v =
           match List.map (fun i -> i.it) glob.value.it with
             | [Ast.Const lit] -> lit.it
-            | _ -> failwith "FATAL: global with non-constant value" in
+            | _ -> failwith "global with non-constant value" in
         let metadata =
           Global.create ~name:None glob.gtype in
         let ir_glob = { gtype = glob.gtype; value = v } in
@@ -383,6 +382,27 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
           | _ -> (* Other exports don't matter on this pass *) acc
       ) func_metadata_map ast_mod.exports in
 
+    (* Next up, add all of the data definitions *)
+    let data_defs =
+      let open Libwasm.Ast in
+      let open Libwasm.Values in
+      List.map (fun (data_seg: string segment) ->
+        let data_seg = data_seg.it in
+        let offset_addr =
+          (* ugh. The position information makes this a right headache. *)
+          match data_seg.offset.it with
+            | [x] ->
+                (* ugh *)
+                begin
+                  match x.it with
+                    | Ast.Const v -> I32Value.of_value v.it
+                    | _ -> failwith "unsupported data offset type"
+                end
+            | _ -> failwith "unsupported data offset type" in
+        { offset = Int64.of_int32 offset_addr;
+          contents = data_seg.init }) ast_mod.data in
+
+
     (* Now that that's all sorted, we can compile each function *)
     let funcs =
       List.fold_left (fun (i, acc) func ->
@@ -406,8 +426,6 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         | [] -> None
         | x :: _ -> Some x.it.mtype in
     (* And for now, that should be it? *)
-    { funcs; globals; start ; memory_metadata; exports }
-
-
+    { funcs; globals; start ; memory_metadata; exports; data = data_defs }
 
 

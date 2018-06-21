@@ -706,11 +706,29 @@ let compile_functions env (ir_mod: Stackless.module_) =
 (* TODO: Will need to extend this to properly register functions / globals /
  * memories with the RTS when we get to that point.
  * For now, the init function just calls the start method if one is defined. *)
-let init_function module_name env (ir_mod: Stackless.module_) =
+let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
   let memory_body =
     match ir_mod.memory_metadata with
       | Some (MemoryType lims) ->
+        let root =
+          Cop (Cload (Word_int, Mutable),
+            [Cconst_symbol (Compile_env.memory_symbol env)], nodbg) in
+
+        let init_data =
+          let memcpy (symb, offset, size) =
+            let addr = Cop (Caddi,
+              [root;
+               Cconst_natint (Int64.to_nativeint offset)], nodbg) in
+            Cop (Cextcall ("memcpy", typ_void, false, None),
+              [addr; Cconst_symbol symb; Cconst_int size], nodbg) in
+
+          let rec call_seq calls =
+            match calls with
+              | [] -> Ctuple []
+              | x :: xs -> Csequence (x, call_seq xs) in
+          call_seq (List.map (memcpy) data_info) in
+
         let min_pages = Cconst_natint (Nativeint.of_int32 lims.min) in
         let max_pages =
           begin
@@ -720,11 +738,12 @@ let init_function module_name env (ir_mod: Stackless.module_) =
                   Cconst_natint (Nativeint.of_string "0xFFFFFFFF")
           end in
         let memory_symbol = Cconst_symbol (Compile_env.memory_symbol env) in
-        Cop (
-          Cextcall ("wasm_rt_allocate_memory", typ_void, false, None),
-          [memory_symbol; min_pages; max_pages],
-          nodbg
-        )
+        Csequence (
+          Cop (
+            Cextcall ("wasm_rt_allocate_memory", typ_void, false, None),
+            [memory_symbol; min_pages; max_pages],
+            nodbg
+          ), init_data)
       | None -> Ctuple [] in
 
   let start_body =
@@ -746,6 +765,23 @@ let init_function module_name env (ir_mod: Stackless.module_) =
     fun_dbg = nodbg
   }
 
+(* Returns a Cmm.phrase list, and a (symbol, offset, size) list.
+ * The (symbol, offset, size) list is a list of data symbols along with
+ * their respective sizes. *)
+let module_data name (ir_mod: Stackless.module_) =
+  let name_prefix = (Util.Names.sanitise name) ^ "_Data_" in
+
+  let (_, data_rev, info_rev) =
+    List.fold_left (fun (i, cmm_data, symbol_info) (data: Stackless.data) ->
+      let symb = name_prefix ^ (string_of_int i) in
+      let size = String.length data.contents in
+      let list_entry = (symb, data.offset, size) in
+      let data =
+        Cdata [Cdefine_symbol symb; Cstring data.contents] in
+      (i + 1, data :: cmm_data, list_entry :: symbol_info))
+    (0, [], []) ir_mod.data in
+  (List.rev data_rev, List.rev info_rev)
+
 
 (* IR function to CMM phrase list *)
 let compile_module name (ir_mod: Stackless.module_) =
@@ -754,10 +790,11 @@ let compile_module name (ir_mod: Stackless.module_) =
 
   let env =
     populate_symbols name (Compile_env.empty memory_symbol_name) ir_mod in
-  let init = init_function name env ir_mod in
+  let (data, data_info) = module_data name ir_mod in
+  let init = init_function name env ir_mod data_info in
   (* Memory symbol: points to 0 until init is called *)
   let data =
-    [Cdata [Cdefine_symbol memory_symbol_name; Cint Nativeint.zero]] in
+    (Cdata [Cdefine_symbol memory_symbol_name; Cint Nativeint.zero]) :: data in
   let funcs = compile_functions env ir_mod @ [init] in
   funcs @ data
 
