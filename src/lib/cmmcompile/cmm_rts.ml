@@ -75,7 +75,7 @@ module Memory = struct
       trap trap_ty TrapOOB, expr)
 
   (* Specific for amd64 right now. *)
-  let unsigned_chunk_of_type ty =
+  let chunk_of_type ty =
     let open Libwasm.Types in
     match ty with
       | I32Type -> Thirtytwo_unsigned
@@ -83,23 +83,30 @@ module Memory = struct
       | F32Type -> Single
       | F64Type -> Double
 
-  let signed_chunk_of_type ty sign_extension =
+  let chunk_of_loadop (op: Libwasm.Ast.loadop) =
     let open Libwasm.Memory in
-    let open Libwasm.Types in
-    match ty with
-      | I32Type ->
-          if sign_extension = SX then Thirtytwo_signed
-          else Thirtytwo_unsigned
-      | I64Type -> Word_int
-      | F32Type -> Single
-      | F64Type -> Double
+    match op.sz with
+      | Some (Pack8, ZX) -> Byte_unsigned
+      | Some (Pack8, SX) -> Byte_signed
+      | Some (Pack16, ZX) -> Sixteen_unsigned
+      | Some (Pack16, SX) -> Sixteen_signed
+      | Some (Pack32, ZX) -> Thirtytwo_unsigned
+      | Some (Pack32, SX) -> Thirtytwo_signed
+      | None -> chunk_of_type op.ty
+
+  let chunk_of_storeop (op: Libwasm.Ast.storeop) =
+    let open Libwasm.Memory in
+    match op.sz with
+      | Some (Pack8) -> Byte_unsigned
+      | Some (Pack16) -> Sixteen_unsigned
+      | Some (Pack32) -> Thirtytwo_unsigned
+      | None -> chunk_of_type op.ty
+
 
   (* Public API *)
   let load ~root ~dynamic_pointer ~(op:Libwasm.Ast.loadop) =
     let static_offset = Int32.to_int op.offset in
-    let ext =
-      match op.sz with Some (_, x) -> x | None -> Libwasm.Memory.ZX in
-    let chunk = signed_chunk_of_type op.ty ext in
+    let chunk = chunk_of_loadop op in
     let eo = effective_offset dynamic_pointer static_offset in
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
@@ -114,7 +121,7 @@ module Memory = struct
 
   let store ~root ~dynamic_pointer ~(op:Libwasm.Ast.storeop) ~to_store =
     let static_offset = Int32.to_int op.offset in
-    let chunk = unsigned_chunk_of_type op.ty in
+    let chunk = chunk_of_storeop op in
     let eo = effective_offset dynamic_pointer static_offset in
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
@@ -133,6 +140,7 @@ module Memory = struct
     Cop (Cextcall ("wasm_rt_grow_memory", typ_int, false, None),
       [root; pages], nodbg)
 
-  let size root = MemoryAccessors.memory_size root
+  let size root =
+    Cop (Cdivi, [MemoryAccessors.memory_size root; page_size], nodbg)
 
 end
