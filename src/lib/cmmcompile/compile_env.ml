@@ -31,12 +31,9 @@ let bind_label lbl env =
 
 let lookup_label lbl env = Ir.Label.Id.Map.find (Ir.Label.id lbl) env.label_env
 
-let bind_internal_func_symbol func env =
+let bind_internal_func_symbol prefix func env =
   let open Symbol in
-  (* FIXME: This will not be sufficient
-   * for when we have separate compilation...
-   * Will also need to think harder about exports, etc. *)
-  let name = ("_wasm" ^ (string_of_int env.func_count)) in
+  let name = (prefix ^ (string_of_int env.func_count)) in
   let symbol = Internal_symbol name in
   let new_env =
     { env with func_count = env.func_count + 1;

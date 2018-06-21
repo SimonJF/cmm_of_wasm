@@ -43,7 +43,7 @@ and expr =
 and effect =
   | SetGlobal of Global.t * Var.t
   | Store of store_op
-  
+
 type func = {
   return : Label.t;
   type_ : func_type;

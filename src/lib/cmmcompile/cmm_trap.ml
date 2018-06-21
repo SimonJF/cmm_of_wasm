@@ -24,7 +24,24 @@ let trap_id = function
   | TrapCallIndirect -> 6
   | TrapExhaustion -> 7
 
-let trap reason =
-  Cop (Cextcall ("wasm_rt_trap", typ_int, false, None),
+let trap_ty =
+  let open Libwasm.Types in
+  function
+    | I32Type | I64Type -> typ_int
+    | F32Type | F64Type -> typ_float
+
+
+(* Traps don't return. But to successfully create join points
+ * where one join ends in a trap (for example, memory bounds checks),
+ * we need to ensure that the right register type is specified in the
+ * call to trap. *)
+let trap ty reason =
+  Cop (Cextcall ("wasm_rt_trap", ty, false, None),
     [Cconst_int (trap_id reason)], nodbg)
+
+let trap_int = trap typ_int
+let trap_float = trap typ_int
+
+
+
 

@@ -3,6 +3,7 @@
 open Cmm
 open Cmm_trap
 
+type alignment = int
 type cmm_address = Cmm.expression
 
 module Memory = struct
@@ -52,31 +53,79 @@ module Memory = struct
 
 
   (* Number of bytes offset for the given WASM address *)
-  let physical_offset addr =
-    Cop (Cmuli, [Cconst_natint (i64_to_native addr); page_size], nodbg)
+  let effective_offset addr offset =
+    (* I *think* addresses refer to bytes... So we don't need to do anything
+     * special here *)
+    if offset = 0 then
+      addr
+    else
+      Cop (Caddi, [addr; Cconst_int offset], nodbg)
 
-  let to_physical_addr root addr =
-    Cop (Caddi, [MemoryAccessors.data_pointer root; physical_offset addr], nodbg)
 
-  (* Public API *)
-  let with_mem_check root addr chunk expr =
-    (* if ( (addr * page_size) + size(chunk_expr) > mem_size) then trap else expr *)
+  let effective_address root offset =
+    Cop (Caddi, [MemoryAccessors.data_pointer root; offset], nodbg)
+
+
+  let with_mem_check ~root ~trap_ty ~effective_offset ~chunk ~expr =
+    (* if ( effective_address + size(chunk_expr) > mem_size) then trap else expr *)
     Cifthenelse (
       Cop (Ccmpa Cgt,
-        [Cop (Caddi,
-           [Cop (Cmuli, [Cconst_natint (i64_to_native addr); page_size], nodbg);
-           page_size], nodbg);
+        [Cop (Caddi, [effective_offset; Cconst_int (chunk_size chunk)], nodbg);
          MemoryAccessors.memory_size root], nodbg),
-      trap TrapOOB, expr)
+      trap trap_ty TrapOOB, expr)
 
-  let load root addr chunk =
-    with_mem_check root addr chunk
-      (Cop (Cload (chunk, Mutable), [to_physical_addr root addr], nodbg))
+  (* Specific for amd64 right now. *)
+  let unsigned_chunk_of_type ty =
+    let open Libwasm.Types in
+    match ty with
+      | I32Type -> Thirtytwo_unsigned
+      | I64Type -> Word_int
+      | F32Type -> Single
+      | F64Type -> Double
 
-  let store root addr to_store chunk =
-    with_mem_check root addr chunk
-      (Cop (Cstore (chunk, Assignment),
-        [to_physical_addr root addr; to_store], nodbg))
+  let signed_chunk_of_type ty sign_extension =
+    let open Libwasm.Memory in
+    let open Libwasm.Types in
+    match ty with
+      | I32Type ->
+          if sign_extension = SX then Thirtytwo_signed
+          else Thirtytwo_unsigned
+      | I64Type -> Word_int
+      | F32Type -> Single
+      | F64Type -> Double
+
+  (* Public API *)
+  let load ~root ~dynamic_pointer ~(op:Libwasm.Ast.loadop) =
+    let static_offset = Int32.to_int op.offset in
+    let ext =
+      match op.sz with Some (_, x) -> x | None -> Libwasm.Memory.ZX in
+    let chunk = signed_chunk_of_type op.ty ext in
+    let eo = effective_offset dynamic_pointer static_offset in
+    let eo_ident = Ident.create "eo" in
+    let eo_var = Cvar eo_ident in
+    Clet (eo_ident, eo,
+      with_mem_check
+        ~root
+        ~trap_ty:(trap_ty op.ty)
+        ~effective_offset:eo_var
+        ~chunk
+        ~expr:(Cop (Cload (chunk, Mutable),
+          [effective_address root eo_var], nodbg)))
+
+  let store ~root ~dynamic_pointer ~(op:Libwasm.Ast.storeop) ~to_store =
+    let static_offset = Int32.to_int op.offset in
+    let chunk = unsigned_chunk_of_type op.ty in
+    let eo = effective_offset dynamic_pointer static_offset in
+    let eo_ident = Ident.create "eo" in
+    let eo_var = Cvar eo_ident in
+    Clet (eo_ident, eo,
+      with_mem_check
+        ~root
+        ~trap_ty:typ_void
+        ~effective_offset:eo_var
+        ~chunk
+        ~expr:(Cop (Cstore (chunk, Assignment),
+          [effective_address root eo_var; to_store], nodbg)))
 
   let grow root pages =
     (* I *think* it's safe to put false as allocation flag here, since

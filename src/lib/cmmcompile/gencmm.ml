@@ -29,10 +29,10 @@ let nodbg = Debuginfo.none
 let fuel_ident = Ident.create "FUEL"
 
 (* Preamble: Check if we're out of fuel. If so, trap. *)
-let add_exhaustion_check func_body =
+let add_exhaustion_check return_ty func_body =
   Cifthenelse (
     Cop (Ccmpi Cle, [Cvar fuel_ident; Cconst_int 0], nodbg),
-    trap TrapExhaustion,
+    trap return_ty TrapExhaustion,
     func_body)
 
 (* Integer operations *)
@@ -177,7 +177,7 @@ let compile_binop env op v1 v2 =
       Clet (norm_i2, normal_i2,
         Cifthenelse (
           Cop (Ccmpi Ceq, [Cvar norm_i2; cmp], nodbg),
-          trap TrapDivZero,
+          trap_int TrapDivZero,
           div_f norm_i1 norm_i2
         )
       )
@@ -212,7 +212,7 @@ let compile_binop env op v1 v2 =
       norm_fn
       (fun norm_i1 norm_i2 ->
         let div = Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg) in
-        div_overflow_check signed norm_i1 norm_i2 div (trap TrapIntOverflow)) in
+        div_overflow_check signed norm_i1 norm_i2 div (trap_int TrapIntOverflow)) in
 
   let rem signed =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
@@ -471,7 +471,11 @@ let compile_expression env =
   | Select { cond ; ifso ; ifnot } ->
       Cifthenelse (Cvar (lv env cond), Cvar(lv env ifso), Cvar(lv env ifnot))
   | GetGlobal _ -> unimplemented
-  | Load (loadop, v) -> unimplemented
+  | Load (loadop, v) ->
+      Cmm_rts.Memory.load
+        ~root:(Cconst_symbol (Compile_env.memory_symbol env))
+        ~dynamic_pointer:(unset_high_32 @@ Cvar (lv env v))
+        ~op:loadop
   | MemorySize ->
       Cmm_rts.Memory.size (Cconst_symbol (Compile_env.memory_symbol env))
   | MemoryGrow v ->
@@ -522,7 +526,10 @@ let compile_terminator env =
       let br_id = Compile_env.lookup_label (Branch.label b) env in
       Cexit (br_id, args) in
   function
-    | Unreachable -> trap TrapUnreachable
+    | Unreachable ->
+        (* FIXME: Dodgy. We'll need some more info to decide whether to
+         * trap_int or trap_float. *)
+        trap_int TrapUnreachable
     | Br b -> branch b
     | BrTable { index ; es ; default } ->
         (* Bounds check needs to be done at runtime. *)
@@ -622,9 +629,18 @@ let rec compile_body env terminator = function
             let (ident, env) = bind_var v env in
             let e1 = compile_expression env e in
             Clet (ident, e1, compile_body env terminator xs)
-        | Effect eff ->
+        | Effect (SetGlobal (_glob, _v)) ->
             (* FIXME: Implement this *)
             compile_body env terminator xs
+        | Effect (Store { op; index; value }) ->
+            Csequence (
+              Cmm_rts.Memory.store
+                ~root:(Cconst_symbol (Compile_env.memory_symbol env))
+                ~dynamic_pointer:(unset_high_32 @@ Cvar (lv env index))
+                ~op
+                ~to_store:(Cvar (lv env value)),
+            compile_body env terminator xs)
+
       end
 and compile_term env term = compile_body env (term.terminator) (term.body)
 
@@ -638,6 +654,11 @@ let compile_function (ir_func: Stackless.func) func_md env =
   (* Arguments: Need to bind each param in the env we will
    * use to compile the function, and pair with machtype *)
   let FuncType (arg_tys, ret_tys) = Func.type_ func_md in
+  let tty =
+    match ret_tys with
+      | [] -> typ_void
+      | [x] -> trap_ty x
+      | _ -> assert false in
   let zipped =
     List.combine ir_func.params arg_tys in
   let (args_rev, env) =
@@ -649,7 +670,7 @@ let compile_function (ir_func: Stackless.func) func_md env =
   let body =
     compile_term env ir_func.body
     |> normalise_function ret_tys
-    |> add_exhaustion_check in
+    |> add_exhaustion_check tty in
   (* Finally, we can put it all together... *)
   {
     fun_name = name;
@@ -673,7 +694,7 @@ let rec populate_symbols module_name env (ir_module: Stackless.module_) : Compil
               name_prefix ^ name in
           (* Internal name if we're generating CMM; standard name if not *)
           Compile_env.bind_global_func_symbol md name acc
-      | None -> Compile_env.bind_internal_func_symbol md acc |> snd
+      | None -> Compile_env.bind_internal_func_symbol name_prefix md acc |> snd
   ) (ir_module.funcs) env
 
 let compile_functions env (ir_mod: Stackless.module_) =

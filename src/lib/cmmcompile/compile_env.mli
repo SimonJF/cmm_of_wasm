@@ -9,7 +9,11 @@ val bind_label : Ir.Label.t -> t -> (int * t)
 
 val lookup_label : Ir.Label.t -> t -> int
 
-val bind_internal_func_symbol : Ir.Func.t -> t -> (Symbol.symbol * t)
+val bind_internal_func_symbol :
+  string (* module prefix *) ->
+  Ir.Func.t ->
+  t ->
+  (Symbol.symbol * t)
 
 val bind_global_func_symbol : Ir.Func.t -> string -> t -> t
 
