@@ -58,10 +58,13 @@ module Memory = struct
   let effective_offset addr offset =
     (* I *think* addresses refer to bytes... So we don't need to do anything
      * special here *)
-    if offset = 0 then
+    if offset = Nativeint.zero then
       addr
     else
-      Cop (Caddi, [addr; Cconst_int offset], nodbg)
+      let normalised_offset =
+        Cconst_natint (Nativeint.logand offset
+          (Nativeint.of_string "0x00000000FFFFFFFF")) in
+      Cop (Cadda, [addr; normalised_offset], nodbg)
 
 
   let effective_address root offset =
@@ -69,12 +72,15 @@ module Memory = struct
 
 
   let with_mem_check ~root ~trap_ty ~effective_offset ~chunk ~expr =
-    (* if ( effective_address + size(chunk_expr) > mem_size) then trap else expr *)
-    Cifthenelse (
+    let out_of_bounds =
       Cop (Ccmpa Cgt,
         [Cop (Caddi, [effective_offset; Cconst_int (chunk_size chunk)], nodbg);
-         MemoryAccessors.memory_size root], nodbg),
-      trap trap_ty TrapOOB, expr)
+         MemoryAccessors.memory_size root], nodbg) in
+
+    Cifthenelse (
+      out_of_bounds,
+      trap trap_ty TrapOOB,
+      expr)
 
   (* Specific for amd64 right now. *)
   let chunk_of_type ty =
@@ -107,26 +113,40 @@ module Memory = struct
 
   (* Public API *)
   let load ~root ~dynamic_pointer ~(op:Libwasm.Ast.loadop) =
-    let static_offset = Int32.to_int op.offset in
+    let open Libwasm.Types in
+    let static_offset = Nativeint.of_int32 op.offset in
     let chunk = chunk_of_loadop op in
     let eo = effective_offset dynamic_pointer static_offset in
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
+    let base_expr =
+      Cop (Cload (chunk, Mutable), [effective_address root eo_var], nodbg) in
+    let expr =
+      (* HACK: OCaml helpfully transforms a F32 into a F64 when
+       * loading. We need to transform it back... *)
+      if op.ty = F32Type then
+        Cop (Cf32off64, [base_expr], nodbg)
+      else base_expr in
+
     Clet (eo_ident, eo,
       with_mem_check
         ~root
         ~trap_ty:(trap_ty op.ty)
         ~effective_offset:eo_var
         ~chunk
-        ~expr:(Cop (Cload (chunk, Mutable),
-          [effective_address root eo_var], nodbg)))
+        ~expr)
 
   let store ~root ~dynamic_pointer ~(op:Libwasm.Ast.storeop) ~to_store =
-    let static_offset = Int32.to_int op.offset in
+    let open Libwasm.Types in
+    let static_offset = Nativeint.of_int32 op.offset in
     let chunk = chunk_of_storeop op in
     let eo = effective_offset dynamic_pointer static_offset in
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
+    let to_store =
+      if op.ty = F32Type then
+        Cop (Cf64off32, [to_store], nodbg)
+      else to_store in
     Clet (eo_ident, eo,
       with_mem_check
         ~root

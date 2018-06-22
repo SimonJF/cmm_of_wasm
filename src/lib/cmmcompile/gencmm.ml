@@ -71,18 +71,12 @@ let normalise_function return_ty body =
 (* Compilation *)
 
 (* Cmm_of_wasm assumes a 64-bit host and target architecture. I do not intend
- * to support 32-bit architectures any time soon.
- *
- * FIXME: We're not supporting 32-bit floats yet, which are erroneously
- * compiled as 64-bit floats.
- * This needs more thought.
- * *)
+ * to support 32-bit architectures any time soon. *)
 let compile_value =
   let open Libwasm.Values in
   function
   | I32 x -> Cconst_int (Int32.to_int x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
-  (* TODO: Float support *)
   | F32 x ->
       f32_of_f64 (
         Cconst_float (Libwasm.F64_convert.promote_f32 x |> Libwasm.F64.to_float))
@@ -111,9 +105,6 @@ let compile_op_normalised signed env op v1 v2 =
     | I32Type ->
         compile_op (normalise v1ty (Cvar i1)) (normalise v2ty (Cvar i2))
     | _ -> compile_op (Cvar i1) (Cvar i2)
-
-
-
 
 let compile_relop env op v1 v2 =
   let open Libwasm.Ast in
