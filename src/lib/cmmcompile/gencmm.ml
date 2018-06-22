@@ -730,13 +730,13 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
               | x :: xs -> Csequence (x, call_seq xs) in
           call_seq (List.map (memcpy) data_info) in
 
+        let max_addressable_pages = 65535 in
         let min_pages = Cconst_natint (Nativeint.of_int32 lims.min) in
         let max_pages =
           begin
             match lims.max with
               | Some x -> Cconst_natint (Nativeint.of_int32 x)
-              | None ->
-                  Cconst_natint (Nativeint.of_string "0xFFFFFFFF")
+              | None -> Cconst_natint (Nativeint.of_int max_addressable_pages)
           end in
         let memory_symbol = Cconst_symbol (Compile_env.memory_symbol env) in
           Csequence (
@@ -791,7 +791,7 @@ let module_data name (ir_mod: Stackless.module_) =
 (* IR function to CMM phrase list *)
 let compile_module name (ir_mod: Stackless.module_) =
   let name_prefix = (Util.Names.sanitise name) ^ "_" in
-  let memory_symbol_name = name_prefix ^ "_Memory" in
+  let memory_symbol_name = name_prefix ^ "Memory" in
 
   let env =
     populate_symbols name (Compile_env.empty memory_symbol_name) ir_mod in
