@@ -12,3 +12,4 @@ val header_prefix_path : unit -> string
 val rts_path : unit -> string
 val rts_header : unit -> string
 val initial_fuel : unit -> int
+val keep_temp : unit -> bool

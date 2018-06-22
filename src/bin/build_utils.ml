@@ -43,7 +43,9 @@ let link_files obj_files out_file =
       (String.concat " " obj_files) out_file in
   run_command command
 
-let cleanup_temp_files files = List.iter (Sys.remove) files
+let cleanup_temp_files files =
+  if not (Command_line.keep_temp ()) then
+    List.iter (Sys.remove) files
 
 let build_without_c ~output_name ~out_dir cmm =
   let assembly_filename = Filename.temp_file output_name ".s" in
@@ -54,7 +56,8 @@ let build_without_c ~output_name ~out_dir cmm =
     end;
   gen_asm assembly_filename obj_file cmm;
   call_compiler ["-c"] assembly_filename obj_file;
-  cleanup_temp_files [assembly_filename]
+  if not (Command_line.keep_temp ()) then
+    cleanup_temp_files [assembly_filename]
 
 let write_file (filename: string) (contents: string) =
   let oc = open_out filename in
@@ -74,7 +77,7 @@ let generate_c_stubs ~header_filename (ir:Ir.Stackless.module_) =
 
 let write_tmp_c_stubs ~header ~header_filename ~stub ~stub_filename =
   write_file header_filename header ;
-  write_file stub_filename stub 
+  write_file stub_filename stub
 
 (* Default: build with C stubs *)
 let build ~output_name ~out_dir ~ir ~cmm =
@@ -111,7 +114,7 @@ let build ~output_name ~out_dir ~ir ~cmm =
   end;
   (* Generate C stubs and headers *)
   let (header, stub) =
-    generate_c_stubs 
+    generate_c_stubs
       ~header_filename:stub_h_filename
       ir in
   write_tmp_c_stubs
