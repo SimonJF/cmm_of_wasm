@@ -123,9 +123,11 @@ module Memory = struct
       Cop (Cload (chunk, Mutable), [effective_address root eo_var], nodbg) in
     let expr =
       (* HACK: OCaml helpfully transforms a F32 into a F64 when
-       * loading. We need to transform it back... *)
+       * loading. This won't do, since WASM expects F32 store / loads
+       * to be bit-preserving, so we have to emulate via a C call. *)
       if op.ty = F32Type then
-        Cop (Cf32off64, [base_expr], nodbg)
+        Cop (Cextcall ("wasm_rt_load_f32", typ_float, false, None),
+          [root; eo_var], nodbg)
       else base_expr in
 
     Clet (eo_ident, eo,
@@ -143,9 +145,11 @@ module Memory = struct
     let eo = effective_offset dynamic_pointer static_offset in
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
+    (* As above. *)
     let to_store =
       if op.ty = F32Type then
-        Cop (Cf64off32, [to_store], nodbg)
+        Cop (Cextcall ("wasm_rt_store_f32", typ_float, false, None),
+          [root; eo_var; to_store], nodbg)
       else to_store in
     Clet (eo_ident, eo,
       with_mem_check

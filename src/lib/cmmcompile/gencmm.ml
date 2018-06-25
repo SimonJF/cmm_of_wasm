@@ -78,8 +78,14 @@ let compile_value =
   | I32 x -> Cconst_int (Int32.to_int x)
   | I64 x -> Cconst_natint (Int64.to_nativeint x)
   | F32 x ->
-      f32_of_f64 (
-        Cconst_float (Libwasm.F64_convert.promote_f32 x |> Libwasm.F64.to_float))
+      (* Evil unsafe typecasting voodoo. *)
+      (* The idea is this. We have an exact f32 bit pattern we want to store
+       * in a register. OCaml's desperately trying to extend it to an f64 one.
+       *
+       * We convert this bit pattern to an int64. Then, we circumvent the
+       * extension by just calling Int64.float_of_bits. Evil genius.
+       *)
+      Cconst_float (Libwasm.F32.to_bits x |> Int64.of_int32 |> Int64.float_of_bits)
   | F64 x -> Cconst_float (Libwasm.F64.to_float x)
 
 
