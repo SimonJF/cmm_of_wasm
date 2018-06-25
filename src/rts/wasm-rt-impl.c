@@ -200,11 +200,11 @@ f64 wasm_rt_zero_max_f64(f64 f1, f64 f2) {
 
 f32 wasm_rt_load_f32(wasm_rt_memory_t* mem, u64 offset) {
   f32 result;
-  memcpy(&result, &mem->data[offset], sizeof(result));
+  memcpy(&result, mem->data + offset, sizeof(result));
   return result;
 }
 
 void wasm_rt_store_f32(wasm_rt_memory_t* mem, u64 offset, f32 to_store) {
-  memcpy(&mem->data[offset], &to_store, sizeof(f32));
+  memcpy(mem->data + offset, &to_store, sizeof(f32));
 }
 

@@ -146,19 +146,20 @@ module Memory = struct
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
     (* As above. *)
-    let to_store =
+    let expr =
       if op.ty = F32Type then
-        Cop (Cextcall ("wasm_rt_store_f32", typ_float, false, None),
+        Cop (Cextcall ("wasm_rt_store_f32", typ_void, false, None),
           [root; eo_var; to_store], nodbg)
-      else to_store in
+      else
+        Cop (Cstore (chunk, Assignment),
+        [effective_address root eo_var; to_store], nodbg) in
     Clet (eo_ident, eo,
       with_mem_check
         ~root
         ~trap_ty:typ_void
         ~effective_offset:eo_var
         ~chunk
-        ~expr:(Cop (Cstore (chunk, Assignment),
-          [effective_address root eo_var; to_store], nodbg)))
+        ~expr)
 
   let grow root pages =
     (* I *think* it's safe to put false as allocation flag here, since
