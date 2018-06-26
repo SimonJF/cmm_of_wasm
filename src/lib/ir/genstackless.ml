@@ -70,7 +70,6 @@ let ir_term env instrs =
               else [] in
             (* Push parameters onto to virtual stack *)
             let stack = Translate_env.stack env in
-            (* TODO: I think that the argument parameters need to be reversed... *)
             let new_stack = (List.rev arg_params) @ stack in
             let env =
               let base_env = Translate_env.with_stack new_stack env in
@@ -290,7 +289,7 @@ let bind_locals env params locals =
 
 let ir_func
     (functions: Func.t Util.Maps.Int32Map.t)
-    (globs: (Stackless.global * Global.t) Util.Maps.Int32Map.t)
+    (globs: Global.t Util.Maps.Int32Map.t)
     (ast_func: Libwasm.Ast.func)
     (func_metadata: Func.t) =
   let open Libwasm.Types in
@@ -326,6 +325,20 @@ let ir_func
     body = fn_body;
   }
 
+(* Resolves a constant expression to a WASM value.
+ * Requires the globals map since constants may refer to global
+ * variables. *)
+let value_of_const globals const =
+  let open Util.Maps in
+  match List.map (fun i -> i.it) const with
+    | [Libwasm.Ast.Const lit] -> lit.it
+    | [Libwasm.Ast.GetGlobal i] ->
+        (* GetGlobal as a constant may only point to immutable globals,
+         * whose contents are statically known. *)
+        Int32Map.find (i.it) globals
+        |> Global.initial_value
+    | _ -> failwith "expected constant of length 1"
+
 let ir_module (ast_mod: Libwasm.Ast.module_) =
     let open Util.Maps in
     let module Ast = Libwasm.Ast in
@@ -347,16 +360,9 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let globals =
       List.fold_left (fun (i, acc) (glob: Ast.global) ->
         let glob = glob.it in
-        (* This must either be an Ast.const or a global.
-         * Until we get globals going properly, assume it's a const *)
-        let v =
-          match List.map (fun i -> i.it) glob.value.it with
-            | [Ast.Const lit] -> lit.it
-            | _ -> failwith "global with non-constant value" in
-        let metadata =
-          Global.create ~name:None glob.gtype in
-        let ir_glob = { gtype = glob.gtype; value = v } in
-        let acc = Int32Map.add i (ir_glob, metadata) acc in
+        let v = value_of_const acc glob.value.it in
+        let ir_global = Global.create ~name:None glob.gtype v in
+        let acc = Int32Map.add i ir_global acc in
         (Int32.(add i one), acc)) (0l, Int32Map.empty) ast_mod.globals
       |> snd in
 
@@ -389,16 +395,8 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
       List.map (fun (data_seg: string segment) ->
         let data_seg = data_seg.it in
         let offset_addr =
-          (* ugh. The position information makes this a right headache. *)
-          match data_seg.offset.it with
-            | [x] ->
-                (* ugh *)
-                begin
-                  match x.it with
-                    | Ast.Const v -> I32Value.of_value v.it
-                    | _ -> failwith "unsupported data offset type"
-                end
-            | _ -> failwith "unsupported data offset type" in
+          I32Value.of_value
+            (value_of_const globals data_seg.offset.it) in
         { offset = Int64.of_int32 offset_addr;
           contents = data_seg.init }) ast_mod.data in
 

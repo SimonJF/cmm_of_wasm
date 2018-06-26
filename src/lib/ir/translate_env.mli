@@ -5,7 +5,7 @@ val create :
   continuation:Label.t ->
   return:Label.t ->
   locals:Var.t Util.Maps.Int32Map.t ->
-  globals:(Stackless.global * Global.t) Util.Maps.Int32Map.t ->
+  globals:Global.t Util.Maps.Int32Map.t ->
   functions:Func.t Util.Maps.Int32Map.t ->
   t
 

@@ -1,16 +1,26 @@
 open Libwasm
 
+module Id = struct
+  type t = int
+  let count = ref (-1)
+  let create () =
+    incr count;
+    !count
+
+  let to_string = string_of_int
+  let compare = Pervasives.compare
+end
+
 type t = {
-  id : int;
+  id : Id.t;
   type_ : Types.global_type;
   name : Ast.name option;
+  initial_value : Libwasm.Values.value
 }
 
-let count = ref (-1)
-let create ~name (type_ : Types.global_type) =
-  incr count;
-  let id = !count in
-  { id; name; type_ }
+let create ~name (type_ : Types.global_type) initial_value =
+  let id = Id.create () in
+  { id; name; type_ ; initial_value }
 
 let name t =
   match t.name with
@@ -24,9 +34,11 @@ let is_mutable { type_ = GlobalType (_, mut); _ } =
 
 let type_ { type_ = GlobalType (typ, _); _ } = typ
 
+let initial_value x = x.initial_value
+
 let print ppf t =
   match t.name with
-    | None -> Format.fprintf ppf "g%i" t.id
+    | None -> Format.fprintf ppf "g%s" (Id.to_string t.id)
     | Some name -> Format.fprintf ppf "%s" (Util.Names.name_to_string name)
 
 let to_sexpr x =
@@ -37,20 +49,7 @@ let to_sexpr x =
       | Some name -> [Atom ("name " ^ name)] in
 
   Node ("global", name @ [
-    Atom ("id " ^ (string_of_int x.id));
+    Atom ("id " ^ (Id.to_string x.id));
     Atom ("type " ^ (Types.string_of_global_type x.type_))
   ])
 
-
-module M = struct
-  type nonrec t = t
-  let compare a b = compare a.id b.id
-end
-
-module Map = struct
-  include Map.Make(M)
-  let print f ppf s =
-    let elts ppf s = iter (fun id v ->
-        Format.fprintf ppf "@ (@[%a@ %a@])" print id f v) s in
-    Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
-end

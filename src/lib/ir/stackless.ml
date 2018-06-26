@@ -51,11 +51,6 @@ type func = {
   body : term;
 }
 
-type global = {
-  gtype : global_type;
-  value : Libwasm.Values.value
-}
-
 type data = {
   offset: int64;
   contents: string
@@ -63,7 +58,7 @@ type data = {
 
 type module_ = {
     funcs : (func * Func.t) Util.Maps.Int32Map.t;
-    globals: (global * Global.t) Util.Maps.Int32Map.t;
+    globals: Global.t Util.Maps.Int32Map.t;
     start : Func.t option;
     memory_metadata: Libwasm.Types.memory_type option;
     (* TODO: Fill the rest of this in *)

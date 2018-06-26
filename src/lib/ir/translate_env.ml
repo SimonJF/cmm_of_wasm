@@ -6,7 +6,7 @@ type t = {
   function_return: Label.t;
   locals: Var.t Int32Map.t;
   labels: Label.t list;
-  globals: (Stackless.global * Global.t) Int32Map.t;
+  globals: Global.t Int32Map.t;
   functions: Func.t Int32Map.t
 }
 
@@ -88,7 +88,7 @@ let with_locals locals env =
   { env with locals = new_locals}
 
 let get_global (var: Libwasm.Ast.var) env =
-  Int32Map.find (var.it) env.globals |> snd
+  Int32Map.find (var.it) env.globals
 
 let get_function (var: Libwasm.Ast.var) env =
   Int32Map.find (var.it) env.functions
