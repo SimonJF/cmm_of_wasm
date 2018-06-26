@@ -22,5 +22,6 @@ val lookup_func_symbol : Ir.Func.t -> t -> Symbol.symbol
 val symbols : t -> Symbol.symbol list
 
 val memory_symbol : t -> string
+val global_symbol : t -> Ir.Global.t -> string
 
 val dump : t -> unit

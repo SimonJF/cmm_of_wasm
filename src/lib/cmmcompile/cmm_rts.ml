@@ -171,3 +171,23 @@ module Memory = struct
     Cop (Cdivi, [MemoryAccessors.memory_size root; page_size], nodbg)
 
 end
+
+
+module Globals = struct
+
+  let set ~symbol ~ty ~to_store =
+    if ty = Libwasm.Types.F32Type then
+      Cop (Cextcall ("wasm_rt_set_global_f32", typ_void, false, None),
+        [symbol; to_store], nodbg)
+    else
+      let chunk = Memory.chunk_of_type ty in
+      Cop (Cstore (chunk, Assignment), [symbol; to_store], nodbg)
+
+  let get ~symbol ~ty =
+    if ty = Libwasm.Types.F32Type then
+      Cop (Cextcall ("wasm_rt_get_global_f32", typ_float, false, None),
+        [symbol], nodbg)
+    else
+      let chunk = Memory.chunk_of_type ty in
+      Cop (Cload (chunk, Mutable), [symbol], nodbg)
+end

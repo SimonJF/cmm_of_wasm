@@ -34,3 +34,16 @@ module Memory : sig
     cmm_address ->
     Cmm.expression
 end
+
+module Globals : sig
+  val set :
+    symbol:Cmm.expression ->
+    ty:Libwasm.Types.value_type ->
+    to_store:Cmm.expression ->
+    Cmm.expression
+
+  val get :
+    symbol:Cmm.expression ->
+    ty:Libwasm.Types.value_type ->
+    Cmm.expression
+end

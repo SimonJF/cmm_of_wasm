@@ -76,9 +76,15 @@ f64 wasm_rt_zero_max_f64(f64 f1, f64 f2);
 // HACK: Need to load / store f32s via a C call, because
 // OCaml converts to a double (and therefore is not bit-preserving)
 // Both of these assume the memory check has been done.
+
+// TODO:
+// It would be nice to reconcile the store/load and set-global/get-global
+// functions.
 void wasm_rt_store_f32(wasm_rt_memory_t* mem, u64 offset, f32 to_store);
 f32 wasm_rt_load_f32(wasm_rt_memory_t* mem, u64 offset);
 
+f32 wasm_rt_get_global_f32(f32* ptr);
+void wasm_rt_set_global_f32(f32* ptr, f32 to_set);
 
 #ifdef __cplusplus
 }

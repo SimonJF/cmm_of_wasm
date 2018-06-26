@@ -18,6 +18,8 @@ type t = {
   initial_value : Libwasm.Values.value
 }
 
+let id x = x.id
+
 let create ~name (type_ : Types.global_type) initial_value =
   let id = Id.create () in
   { id; name; type_ ; initial_value }

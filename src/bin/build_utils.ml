@@ -196,20 +196,3 @@ let parse_file name file =
     unsupported
     unsupported
     file
-
-(*
-let get_start (modul: Ast.module_) =
-  match modul.start with
-  | None -> failwith "No start"
-  | Some start ->
-    let _, func =
-      List.find (fun (id, _) -> id = start) modul.functions
-    in
-    func
-
-let get_func (modul:module_) name =
-  let _, func =
-    List.find (fun (id, _) -> Func_id.is_named id name) modul.functions
-  in
-  func
-  *)

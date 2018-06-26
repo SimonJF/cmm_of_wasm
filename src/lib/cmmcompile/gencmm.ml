@@ -462,12 +462,21 @@ let compile_type : Libwasm.Types.value_type -> machtype =
 
 
 let compile_expression env =
-  let unimplemented = Ctuple [] in
   let open Ir.Stackless in
   function
   | Select { cond ; ifso ; ifnot } ->
       Cifthenelse (Cvar (lv env cond), Cvar(lv env ifso), Cvar(lv env ifnot))
-  | GetGlobal _ -> unimplemented
+  | GetGlobal g ->
+      (* If global is mutable, then we need to read from
+       * its associated symbol. *)
+      if Global.is_mutable g then
+        let symbol =
+          Cconst_symbol (Compile_env.global_symbol env g) in
+        Cmm_rts.Globals.get ~symbol ~ty:(Global.type_ g)
+      else
+        (* If it's immutable, we may simply return its (compiled) initial
+         * value. *)
+        compile_value (Global.initial_value g)
   | Load (loadop, v) ->
       Cmm_rts.Memory.load
         ~root:(Cconst_symbol (Compile_env.memory_symbol env))
@@ -626,9 +635,15 @@ let rec compile_body env terminator = function
             let (ident, env) = bind_var v env in
             let e1 = compile_expression env e in
             Clet (ident, e1, compile_body env terminator xs)
-        | Effect (SetGlobal (_glob, _v)) ->
-            (* FIXME: Implement this *)
-            compile_body env terminator xs
+        | Effect (SetGlobal (g, v)) ->
+            let symbol = Cconst_symbol (Compile_env.global_symbol env g) in
+            Csequence (
+              Cmm_rts.Globals.set
+                ~symbol
+                ~ty:(Global.type_ g)
+                ~to_store:(Cvar (lv env v)),
+              compile_body env terminator xs
+            )
         | Effect (Store { op; index; value }) ->
             Csequence (
               Cmm_rts.Memory.store
@@ -785,19 +800,38 @@ let module_data name (ir_mod: Stackless.module_) =
   (List.rev data_rev |> List.concat, List.rev info_rev)
 
 
+(* TODO: Handle exported globals *)
+let module_globals env (ir_mod: Stackless.module_) =
+  let open Libwasm.Values in
+  let open Util.Maps in
+  let global_bindings = Int32Map.bindings ir_mod.globals in
+
+  let compile_data_value = function
+    | I32 x -> Cint32 (Nativeint.of_int32 x)
+    | I64 x -> Cint (Int64.to_nativeint x)
+    | F32 x -> Cint32 (Libwasm.F32.to_bits x |> Nativeint.of_int32)
+    | F64 x -> Cint (Libwasm.F64.to_bits x |> Int64.to_nativeint) in
+
+  List.map (fun (_, g) ->
+    let dat = compile_data_value (Global.initial_value g) in
+    let symb_name = Compile_env.global_symbol env g in
+    [Cdefine_symbol symb_name; dat]) global_bindings
+  |> List.concat
+
+
 (* IR function to CMM phrase list *)
 let compile_module name (ir_mod: Stackless.module_) =
-  let name_prefix = (Util.Names.sanitise name) ^ "_" in
-  let memory_symbol_name = name_prefix ^ "Memory" in
-
+  let sanitised_name = (Util.Names.sanitise name) in
   let env =
-    populate_symbols name (Compile_env.empty memory_symbol_name) ir_mod in
+    populate_symbols name (Compile_env.empty sanitised_name) ir_mod in
+  let memory_symbol_name = Compile_env.memory_symbol env in
   let (data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in
+  let global_data = module_globals env ir_mod in
   (* Memory symbol: needs 3 words of space to store struct created by RTS *)
   let data =
-    Cdata ([Cdefine_symbol memory_symbol_name;
-     Cint Nativeint.zero; Cint Nativeint.zero ; Cint Nativeint.zero] @ data) in
+    Cdata ([Cdefine_symbol memory_symbol_name; Cskip 24] @ data @ global_data) in
+ (*    Cint Nativeint.zero; Cint Nativeint.zero ; Cint Nativeint.zero] @ data) in *)
   let funcs = compile_functions env ir_mod @ [init] in
   funcs @ [data]
 
