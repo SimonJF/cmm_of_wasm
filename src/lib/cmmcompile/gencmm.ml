@@ -450,7 +450,44 @@ let compile_unop env op v =
     | F32 f32op -> compile_float32_op f32op
     | F64 f64op -> compile_float64_op f64op
 
-let compile_cvtop _ = failwith "Conversion operators not done yet"
+let compile_cvtop env op v =
+  let open Libwasm.Values in
+  let var = Cvar (lv env v) in
+  let unimplemented = var in
+  let unimplemented_float = Cconst_float 0.0 in
+  let unimplemented_int = Cconst_int 0 in
+
+  let compile_int_op ~is_32 =
+    let open Libwasm.Ast.IntOp in
+    function
+      | ExtendSI32 -> sign_extend_i32 var
+      | ExtendUI32 -> unset_high_32 var
+      | WrapI64 ->
+          (* I have a feeling we will need an unsigned modulo
+           * operator here, then we can take i mod MAX_INT_32 *)
+          unimplemented
+      | TruncSF32 -> unimplemented_int
+      | TruncUF32 -> unimplemented_int
+      | TruncSF64 -> unimplemented_int
+      | TruncUF64 -> unimplemented_int
+      | ReinterpretFloat -> unimplemented_int in
+
+  let compile_float_op =
+    let open Libwasm.Ast.FloatOp in
+    function
+      | ConvertSI32 -> unimplemented_float
+      | ConvertUI32 -> unimplemented_float
+      | ConvertSI64 -> unimplemented_float
+      | ConvertUI64 -> unimplemented_float
+      | PromoteF32 -> f64_of_f32 var
+      | DemoteF64 -> f32_of_f64 var
+      | ReinterpretInt -> unimplemented_float in
+
+  match op with
+    | I32 i32op -> compile_int_op ~is_32:true i32op
+    | I64 i64op -> compile_int_op ~is_32:false i64op
+    | F32 f32op -> compile_float_op f32op
+    | F64 f64op -> compile_float_op f64op
 
 let compile_type : Libwasm.Types.value_type -> machtype =
   let open Libwasm.Types in
@@ -506,11 +543,7 @@ let compile_expression env =
   | Binary (bin, v1, v2) ->
       compile_binop env bin v1 v2
   | Convert (cvt, v) ->
-      Cvar (lv env v)
-      (*
-      let op = compile_cvtop cvt in
-      Cop (op, [Cvar (lv env v)], nodbg)
-      *)
+      compile_cvtop env cvt v
 
 let compile_terminator env =
   let open Stackless in
@@ -715,19 +748,18 @@ let compile_functions env (ir_mod: Stackless.module_) =
   |> List.map (fun (_, (func, md)) ->
       Cfunction (compile_function func md env))
 
-(* TODO: Will need to extend this to properly register functions / globals /
- * memories with the RTS when we get to that point.
- * For now, the init function just calls the start method if one is defined. *)
 let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
   let memory_body =
     match ir_mod.memory_metadata with
       | Some (MemoryType lims) ->
+        (* Initialise struct representing this module's memory *)
         let root_ident = Ident.create "data_root" in
         let root =
           Cop (Cload (Word_int, Mutable),
             [Cconst_symbol (Compile_env.memory_symbol env)], nodbg) in
 
+        (* Generate memcpy calls to initialise memory *)
         let init_data =
           let memcpy (symb, offset, size) =
             let addr = Cop (Caddi,
@@ -742,6 +774,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
               | x :: xs -> Csequence (x, call_seq xs) in
           call_seq (List.map (memcpy) data_info) in
 
+        (* Set up memory page limits *)
         let max_addressable_pages = 65535 in
         let min_pages = Cconst_natint (Nativeint.of_int32 lims.min) in
         let max_pages =
@@ -751,6 +784,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
               | None -> Cconst_natint (Nativeint.of_int max_addressable_pages)
           end in
         let memory_symbol = Cconst_symbol (Compile_env.memory_symbol env) in
+        (* Perform allocation, then initialise data *)
           Csequence (
             Cop (
               Cextcall ("wasm_rt_allocate_memory", typ_void, false, None),
@@ -831,7 +865,6 @@ let compile_module name (ir_mod: Stackless.module_) =
   (* Memory symbol: needs 3 words of space to store struct created by RTS *)
   let data =
     Cdata ([Cdefine_symbol memory_symbol_name; Cskip 24] @ data @ global_data) in
- (*    Cint Nativeint.zero; Cint Nativeint.zero ; Cint Nativeint.zero] @ data) in *)
   let funcs = compile_functions env ir_mod @ [init] in
   funcs @ [data]
 
