@@ -492,9 +492,6 @@ let compile_cvtop env op v =
       let (min, max) =
         (* If integer (destination) is 32-bits, min and max need to be 32-bit
          * MIN/MAX_INT *)
-        (* FIXME: There is a boundary condition on max here. I have no idea
-         * how to solve it right now, and it's taking up too much time,
-         * so will come back to it later. *)
         if is_32 then
           let min = Cconst_float (Int32.to_float Int32.min_int) in
           let max = Cconst_float (Int32.to_float Int32.max_int) in
@@ -506,6 +503,8 @@ let compile_cvtop env op v =
       (* If float is 32 bits, we need to first promote it to 64 bits *)
       let cmp =
         if is_float_32 then f64_of_f32 var else var in
+      let max_op =
+        if is_32 && (not is_float_32) then CFgt else CFge in
 
 
       Clet (cmp_ident, cmp,
@@ -516,43 +515,21 @@ let compile_cvtop env op v =
           Cifthenelse (
               Cop (Cor, [
                 Cop (Ccmpf CFlt, [cmp_var; min], nodbg);
-                Cop (Ccmpf CFgt, [cmp_var; max], nodbg)
+                Cop (Ccmpf max_op, [cmp_var; max], nodbg)
               ], nodbg),
             trap_int TrapInvalidConversion,
             ri_var)))) in
 
     let unsigned_float_conversion is_float_32 =
-      (* FIXME: Unsigned float conversion is fundamentally broken.
-       * Cintoffloat performs a *signed* conversion, and as such
-       * we're SOL.
-       *
-       * Consequently, it looks like we'll have to patch this out
-       * to C for the moment. Saaaad face! *)
-      let result_ident = Ident.create "result" in
-      let ri_var = Cvar result_ident in
-      let max =
-        if is_32 then
-          Cconst_float (Nativeint.to_float u32_max)
-        else
-          Cconst_float (Int64.float_of_bits (-1L)) in (* INCORRECT DUE TO NANs: FIXME *)
-      let cmp =
-        if is_float_32 then f64_of_f32 var else var in
-
-      let cmp_ident = Ident.create "cmp" in
-      let cmp_var = Cvar cmp_ident in
-      let result = int_of_float cmp_var in
-      let is_unsigned_overflow cmp_var =
-        Cop (Ccmpf CFeq, [cmp_var; Cconst_float (-. 1.0)], nodbg) in
-
-      Clet (cmp_ident, cmp,
-        Cifthenelse (
-          Cop (Cor, [is_unsigned_overflow cmp_var;
-            Cop (Cor, [is_nan cmp_var; is_infinity cmp_var], nodbg)], nodbg),
-          trap_int TrapInvalidConversion,
-          Clet (result_ident, result,
-            Cifthenelse (Cop (Ccmpf CFgt, [cmp_var; max], nodbg),
-            trap_int TrapInvalidConversion,
-            ri_var)))) in
+      let call_name =
+        (* There must be a prettier way of doing this... *)
+        match (is_32, is_float_32) with
+          | (true, true) -> "wasm_rt_trunc_u32_f32"
+          | (true, false)-> "wasm_rt_trunc_u32_f64"
+          | (false, true) -> "wasm_rt_trunc_u64_f32"
+          | (false, false) -> "wasm_rt_trunc_u64_f64" in
+      Cop (Cextcall (call_name, typ_int, false, None),
+        [var], nodbg) in
 
     let open Libwasm.Ast.IntOp in
     function

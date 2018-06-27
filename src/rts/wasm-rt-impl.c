@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <math.h>
 #include <string.h>
+#include <stdbool.h>
 
 #define PAGE_SIZE 65536
 
@@ -243,5 +244,46 @@ f64 wasm_rt_reinterpret_f64(u64 bits) {
   f64 result;
   memcpy(&result, &bits, sizeof(result));
   return result;
+}
+
+// TODO: MACROS!
+u32 wasm_rt_trunc_u32_f32(f32 f) {
+  if (f != f) { // NaN
+    wasm_rt_trap(WASM_RT_TRAP_INVALID_CONVERSION);
+  }
+  if (f <= ((f32) -1) || f >= ((f32) UINT32_MAX)) {
+    wasm_rt_trap(WASM_RT_TRAP_INT_OVERFLOW);
+  }
+  return ((u32) f);
+}
+
+u32 wasm_rt_trunc_u32_f64(f64 f) {
+  if (f != f) {
+    wasm_rt_trap(WASM_RT_TRAP_INVALID_CONVERSION);
+  }
+  if (f <= ((f64) -1) || f > ((f64) UINT32_MAX)) {
+    wasm_rt_trap(WASM_RT_TRAP_INT_OVERFLOW);
+  }
+  return ((u64) f);
+}
+
+u64 wasm_rt_trunc_u64_f32(f32 f) {
+  if (f != f) { // NaN
+    wasm_rt_trap(WASM_RT_TRAP_INVALID_CONVERSION);
+  }
+  if (f <= ((f32) -1) || f >= ((f32) UINT64_MAX)) {
+    wasm_rt_trap(WASM_RT_TRAP_INT_OVERFLOW);
+  }
+  return ((u64) f);
+}
+
+u64 wasm_rt_trunc_u64_f64(f64 f) {
+  if (f != f) {
+    wasm_rt_trap(WASM_RT_TRAP_INVALID_CONVERSION);
+  }
+  if (f <= ((f64) -1) || f >= ((f64) UINT64_MAX)) {
+    wasm_rt_trap(WASM_RT_TRAP_INT_OVERFLOW);
+  }
+  return ((u64) f);
 }
 

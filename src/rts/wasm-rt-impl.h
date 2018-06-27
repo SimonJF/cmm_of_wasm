@@ -93,6 +93,14 @@ u64 wasm_rt_reinterpret_u64(f64 bits);
 f32 wasm_rt_reinterpret_f32(u32 bits);
 f64 wasm_rt_reinterpret_f64(u64 bits);
 
+// OCaml lacks unsigned float<->integer conversions, so we have to
+// have them in the RTS
+u32 wasm_rt_trunc_u32_f32(f32 f);
+u32 wasm_rt_trunc_u32_f64(f64 f);
+u64 wasm_rt_trunc_u64_f32(f32 f);
+u64 wasm_rt_trunc_u64_f64(f64 f);
+
+
 #ifdef __cplusplus
 }
 #endif
