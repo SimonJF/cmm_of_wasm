@@ -37,11 +37,12 @@ let add_exhaustion_check return_ty func_body =
 
 (* Integer operations *)
 
+let u32_max = Cconst_natint (Nativeint.of_string "0x00000000FFFFFFFF")
+
 let sign_extend_i32 n =
   Cop(Casr, [Cop(Clsl, [n; Cconst_int 32], nodbg); Cconst_int 32], nodbg)
 
-let unset_high_32 n =
-  Cop(Cand, [n; Cconst_natint (Nativeint.of_string "0x00000000FFFFFFFF")], nodbg)
+let unset_high_32 n = Cop(Cand, [n; u32_max], nodbg)
 
 let f32_of_f64 x = Cop (Cf32off64, [x], nodbg)
 let f64_of_f32 x = Cop (Cf64off32, [x], nodbg)
@@ -67,6 +68,20 @@ let normalise_function return_ty body =
     | [] -> body
     | [ty] -> normalise_unsigned ty body
     | _ -> assert false
+
+(* Some handy functions for floats *)
+
+let is_nan x  =
+  Cop (
+    Ccmpf CFneq, [x ; x],
+    nodbg
+  )
+
+let is_infinity x =
+  Cop (Cor,
+      [ Cop (Ccmpf CFeq, [x; Cconst_float (infinity)], nodbg);
+        Cop (Ccmpf CFeq, [x; Cconst_float (infinity)], nodbg)], nodbg)
+
 
 (* Compilation *)
 
@@ -330,12 +345,6 @@ let compile_binop env op v1 v2 =
     let wasm_nan =
         result_f @@ Cconst_float (Libwasm.F64.pos_nan |> Libwasm.F64.to_float) in
 
-    let is_nan x  =
-      Cop (
-        Ccmpf CFneq, [x ; x],
-        nodbg
-      ) in
-
     let float_eq f1 f2 =
       Cop (Ccmpf CFeq, [f1 ; f2], nodbg) in
 
@@ -460,7 +469,58 @@ let compile_cvtop env op v =
   let call_int name args =
     Cop (Cextcall (name, typ_int, false, None), args, nodbg) in
 
+  let float_of_int x =
+    Cop (Cfloatofint, [x], nodbg) in
+  let int_of_float x =
+    Cop (Cintoffloat, [x], nodbg) in
+
   let compile_int_op ~is_32 =
+
+    let signed_float_conversion is_float_32 =
+      (* Checks needed:
+       * - NaNs should trap
+       * - Infinity and negative infinity should trap
+       * - Any integer greater than i32 max and less than i64 max should trap *)
+
+      let result_ident = Ident.create "result" in
+      let ri_var = Cvar result_ident in
+
+      let cmp_ident = Ident.create "cmp" in
+      let cmp_var = Cvar cmp_ident in
+
+      let (min, max) =
+        (* If integer (destination) is 32-bits, min and max need to be 32-bit
+         * MIN/MAX_INT *)
+        (* FIXME: There is a boundary condition on max here. I have no idea
+         * how to solve it right now, and it's taking up too much time,
+         * so will come back to it later. *)
+        if is_32 then
+          let min = Cconst_float (Int32.to_float Int32.min_int) in
+          let max = Cconst_float (Int32.to_float Int32.max_int) in
+          (min, max)
+        else
+          let min = Cconst_float (Int64.to_float Int64.min_int) in
+          let max = Cconst_float (Int64.to_float Int64.max_int) in
+          (min, max) in
+      (* If float is 32 bits, we need to first promote it to 64 bits *)
+      let cmp =
+        if is_float_32 then f64_of_f32 var else var in
+
+
+      Clet (cmp_ident, cmp,
+        Cifthenelse (
+          Cop (Cor, [is_nan cmp_var; is_infinity cmp_var], nodbg),
+          trap_int TrapInvalidConversion,
+          Clet (result_ident, int_of_float cmp_var,
+          Cifthenelse (
+              Cop (Cor, [
+                Cop (Ccmpf CFlt, [cmp_var; min], nodbg);
+                Cop (Ccmpf CFgt, [cmp_var; max], nodbg)
+              ], nodbg),
+            trap_int TrapInvalidConversion,
+            ri_var)))) in
+
+
     let open Libwasm.Ast.IntOp in
     function
       | ExtendSI32 -> sign_extend_i32 var
@@ -470,10 +530,21 @@ let compile_cvtop env op v =
            * anyway, we actually don't need to do anything for
            * this case at all :) *)
           var
-      | TruncSF32 -> unimplemented_int
-      | TruncUF32 -> unimplemented_int
-      | TruncSF64 -> unimplemented_int
-      | TruncUF64 -> unimplemented_int
+      | TruncSF32 -> signed_float_conversion true
+      | TruncUF32 ->
+          let result_ident = Ident.create "result" in
+          let ri_var = Cvar result_ident in
+          let result = int_of_float (f64_of_f32 var) in
+          let max = Cconst_natint (Int64.to_nativeint (Int64.max_int)) in
+          Cifthenelse (
+            Cop (Cor, [is_nan var; is_infinity var], nodbg),
+            trap_int TrapInvalidConversion,
+            Clet (result_ident, result,
+              Cifthenelse (Cop (Ccmpi Cgt, [ri_var; max], nodbg),
+              trap_int TrapInvalidConversion,
+              ri_var)))
+      | TruncSF64 -> signed_float_conversion false
+      | TruncUF64 -> int_of_float var
       | ReinterpretFloat ->
           (* It would be nice to be able to use the CMM load / store
            * mechanism for copying between registers. For now, we can
