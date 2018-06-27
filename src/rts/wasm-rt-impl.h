@@ -86,6 +86,13 @@ f32 wasm_rt_load_f32(wasm_rt_memory_t* mem, u64 offset);
 f32 wasm_rt_get_global_f32(f32* ptr);
 void wasm_rt_set_global_f32(f32* ptr, f32 to_set);
 
+
+// Conversion functions
+u32 wasm_rt_reinterpret_u32(f32 bits);
+u64 wasm_rt_reinterpret_u64(f64 bits);
+f32 wasm_rt_reinterpret_f32(u32 bits);
+f64 wasm_rt_reinterpret_f64(u64 bits);
+
 #ifdef __cplusplus
 }
 #endif

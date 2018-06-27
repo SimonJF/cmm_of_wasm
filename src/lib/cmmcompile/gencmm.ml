@@ -453,9 +453,12 @@ let compile_unop env op v =
 let compile_cvtop env op v =
   let open Libwasm.Values in
   let var = Cvar (lv env v) in
-  let unimplemented = var in
   let unimplemented_float = Cconst_float 0.0 in
   let unimplemented_int = Cconst_int 0 in
+  let call_float name args =
+    Cop (Cextcall (name, typ_float, false, None), args, nodbg) in
+  let call_int name args =
+    Cop (Cextcall (name, typ_int, false, None), args, nodbg) in
 
   let compile_int_op ~is_32 =
     let open Libwasm.Ast.IntOp in
@@ -463,16 +466,22 @@ let compile_cvtop env op v =
       | ExtendSI32 -> sign_extend_i32 var
       | ExtendUI32 -> unset_high_32 var
       | WrapI64 ->
-          (* I have a feeling we will need an unsigned modulo
-           * operator here, then we can take i mod MAX_INT_32 *)
-          unimplemented
+          (* Amusingly, since we're emulating i32s using i64s
+           * anyway, we actually don't need to do anything for
+           * this case at all :) *)
+          var
       | TruncSF32 -> unimplemented_int
       | TruncUF32 -> unimplemented_int
       | TruncSF64 -> unimplemented_int
       | TruncUF64 -> unimplemented_int
-      | ReinterpretFloat -> unimplemented_int in
+      | ReinterpretFloat ->
+          (* It would be nice to be able to use the CMM load / store
+           * mechanism for copying between registers. For now, we can
+           * emulate reinterpret operations using a memcpy in the RTS. *)
+          let suffix = if is_32 then "_u32" else "_u64" in
+          call_int ("wasm_rt_reinterpret" ^ suffix) [var] in
 
-  let compile_float_op =
+  let compile_float_op ~is_32 =
     let open Libwasm.Ast.FloatOp in
     function
       | ConvertSI32 -> unimplemented_float
@@ -481,13 +490,15 @@ let compile_cvtop env op v =
       | ConvertUI64 -> unimplemented_float
       | PromoteF32 -> f64_of_f32 var
       | DemoteF64 -> f32_of_f64 var
-      | ReinterpretInt -> unimplemented_float in
+      | ReinterpretInt ->
+          let suffix = if is_32 then "_f32" else "_f64" in
+          call_float ("wasm_rt_reinterpret" ^ suffix) [var] in
 
   match op with
     | I32 i32op -> compile_int_op ~is_32:true i32op
     | I64 i64op -> compile_int_op ~is_32:false i64op
-    | F32 f32op -> compile_float_op f32op
-    | F64 f64op -> compile_float_op f64op
+    | F32 f32op -> compile_float_op ~is_32:true f32op
+    | F64 f64op -> compile_float_op ~is_32:false f64op
 
 let compile_type : Libwasm.Types.value_type -> machtype =
   let open Libwasm.Types in

@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 #define PAGE_SIZE 65536
 
@@ -216,5 +217,31 @@ f32 wasm_rt_get_global_f32(f32* ptr) {
 
 void wasm_rt_set_global_f32(f32* ptr, f32 to_set) {
   memcpy(ptr, &to_set, sizeof(f32));
+}
+
+// TODO: Macros?
+u32 wasm_rt_reinterpret_u32(f32 bits) {
+  u32 result;
+  memcpy(&result, &bits, sizeof(result));
+  return result;
+}
+
+u64 wasm_rt_reinterpret_u64(f64 bits) {
+  u64 result;
+  memcpy(&result, &bits, sizeof(result));
+  return result;
+}
+
+f32 wasm_rt_reinterpret_f32(u32 bits) {
+  f32 result;
+  memcpy(&result, &bits, sizeof(result));
+  return result;
+}
+
+
+f64 wasm_rt_reinterpret_f64(u64 bits) {
+  f64 result;
+  memcpy(&result, &bits, sizeof(result));
+  return result;
 }
 
