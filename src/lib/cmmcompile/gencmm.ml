@@ -477,7 +477,7 @@ let compile_cvtop env op v =
 
   let compile_int_op ~is_32 =
 
-    let signed_float_conversion is_float_32 =
+    let truncate_signed_float is_float_32 =
       (* Checks needed:
        * - NaNs should trap
        * - Infinity and negative infinity should trap
@@ -506,10 +506,8 @@ let compile_cvtop env op v =
       let max_op =
         if is_32 && (not is_float_32) then CFgt else CFge in
 
-
       Clet (cmp_ident, cmp,
-        Cifthenelse (
-          Cop (Cor, [is_nan cmp_var; is_infinity cmp_var], nodbg),
+        Cifthenelse (is_nan cmp_var,
           trap_int TrapInvalidConversion,
           Clet (result_ident, int_of_float cmp_var,
           Cifthenelse (
@@ -517,10 +515,10 @@ let compile_cvtop env op v =
                 Cop (Ccmpf CFlt, [cmp_var; min], nodbg);
                 Cop (Ccmpf max_op, [cmp_var; max], nodbg)
               ], nodbg),
-            trap_int TrapInvalidConversion,
+            trap_int TrapIntOverflow,
             ri_var)))) in
 
-    let unsigned_float_conversion is_float_32 =
+    let truncate_unsigned_float is_float_32 =
       let call_name =
         (* There must be a prettier way of doing this... *)
         match (is_32, is_float_32) with
@@ -528,6 +526,9 @@ let compile_cvtop env op v =
           | (true, false)-> "wasm_rt_trunc_u32_f64"
           | (false, true) -> "wasm_rt_trunc_u64_f32"
           | (false, false) -> "wasm_rt_trunc_u64_f64" in
+      (* We have to do an RTS call since CMM doesn't support unsigned
+       * conversions. Hacker's Delight has some bit hackery, but they
+       * don't work for the full range of values. *)
       Cop (Cextcall (call_name, typ_int, false, None),
         [var], nodbg) in
 
@@ -540,10 +541,10 @@ let compile_cvtop env op v =
            * anyway, we actually don't need to do anything for
            * this case at all :) *)
           var
-      | TruncSF32 -> signed_float_conversion true
-      | TruncUF32 -> unsigned_float_conversion true
-      | TruncSF64 -> signed_float_conversion false
-      | TruncUF64 -> unsigned_float_conversion false
+      | TruncSF32 -> truncate_signed_float true
+      | TruncUF32 -> truncate_unsigned_float true
+      | TruncSF64 -> truncate_signed_float false
+      | TruncUF64 -> truncate_unsigned_float false
       | ReinterpretFloat ->
           (* It would be nice to be able to use the CMM load / store
            * mechanism for copying between registers. For now, we can
@@ -552,11 +553,60 @@ let compile_cvtop env op v =
           call_int ("wasm_rt_reinterpret" ^ suffix) [var] in
 
   let compile_float_op ~is_32 =
+(*
+    let convert_signed_float is_float_32 =
+      (* Checks needed:
+       * - NaNs should trap
+       * - Any float greater than i32 max and less than i64 max should trap *)
+
+      let result_ident = Ident.create "result" in
+      let ri_var = Cvar result_ident in
+
+      let cmp_ident = Ident.create "cmp" in
+      let cmp_var = Cvar cmp_ident in
+
+      let (min, max) =
+        (* If integer (destination) is 32-bits, min and max need to be 32-bit
+         * MIN/MAX_INT *)
+        if is_32 then
+          let min = Cconst_float (Int32.to_float Int32.min_int) in
+          let max = Cconst_float (Int32.to_float Int32.max_int) in
+          (min, max)
+        else
+          let min = Cconst_float (Int64.to_float Int64.min_int) in
+          let max = Cconst_float (Int64.to_float Int64.max_int) in
+          (min, max) in
+      (* If float is 32 bits, we need to first promote it to 64 bits *)
+      let cmp =
+        if is_float_32 then f64_of_f32 var else var in
+      let max_op =
+        if is_32 && (not is_float_32) then CFgt else CFge in
+
+      Clet (cmp_ident, cmp,
+        Cifthenelse (is_nan cmp_var,
+          trap_int TrapInvalidConversion,
+          Clet (result_ident, int_of_float cmp_var,
+          Cifthenelse (
+              Cop (Cor, [
+                Cop (Ccmpf CFlt, [cmp_var; min], nodbg);
+                Cop (Ccmpf max_op, [cmp_var; max], nodbg)
+              ], nodbg),
+            trap_int TrapIntOverflow,
+            ri_var)))) in
+  *)
+
+
+
     let open Libwasm.Ast.FloatOp in
+
     function
-      | ConvertSI32 -> unimplemented_float
+      | ConvertSI32 ->
+          let cvt = float_of_int (sign_extend_i32 var) in
+          if is_32 then f32_of_f64 cvt else cvt
       | ConvertUI32 -> unimplemented_float
-      | ConvertSI64 -> unimplemented_float
+      | ConvertSI64 ->
+          let cvt = float_of_int var in
+          if is_32 then f32_of_f64 cvt else cvt
       | ConvertUI64 -> unimplemented_float
       | PromoteF32 -> f64_of_f32 var
       | DemoteF64 -> f32_of_f64 var
