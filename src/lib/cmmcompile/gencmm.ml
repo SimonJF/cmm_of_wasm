@@ -463,8 +463,10 @@ let compile_unop env op v =
 let compile_cvtop env op v =
   let open Libwasm.Values in
   let var = Cvar (lv env v) in
+
   let call_float name args =
     Cop (Cextcall (name, typ_float, false, None), args, nodbg) in
+
   let call_int name args =
     Cop (Cextcall (name, typ_int, false, None), args, nodbg) in
 
@@ -555,7 +557,7 @@ let compile_cvtop env op v =
       let cvt_to = if is_32 then "f32" else "f64" in
       let cvt_from = if is_int_32 then "u32" else "u64" in
       let call_name = Printf.sprintf "wasm_rt_convert_%s_%s" cvt_to cvt_from in
-      Cop (Cextcall (call_name, typ_float, false, None), [cvt], nodbg) in
+      call_float call_name [cvt] in
 
     function
       | ConvertSI32 ->

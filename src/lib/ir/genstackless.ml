@@ -261,21 +261,34 @@ let ir_term env instrs =
                 (* Turned off for now as I'm confident in the structured control
                  * representation, and for this to hold, we need to implement
                  * conversion operators *)
-                (* let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in *)
-                (* let _ = assert (v1ty = v2ty) in *)
+                let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
+                let _ = assert (v1ty = v2ty) in
                 bind env (Stackless.Compare (relop, v1, v2)) Libwasm.Types.I32Type
             | Unary unop ->
                 let (v, env) = Translate_env.pop env in
                 bind env (Stackless.Unary (unop, v)) (Var.type_ v)
             | Binary binop ->
                 let (v2, v1), env = Translate_env.pop2 env in
-                let (v1ty, _v2ty) = (Var.type_ v1, Var.type_ v2) in
+                let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
                 (* As above *)
-                (* let _ = assert (v1ty = v2ty) in *)
+                let _ = assert (v1ty = v2ty) in
                 bind env (Stackless.Binary (binop, v1, v2)) v1ty
             | Convert cvtop ->
+                let conversion_result_type =
+                  begin
+                  let open Libwasm.Types in
+                  let open Libwasm.Values in
+                  match cvtop with
+                    | I32 _ -> I32Type
+                    | I64 _ -> I64Type
+                    | F32 _ -> F32Type
+                    | F64 _ -> F64Type
+                  end in
                 let (v, env) = Translate_env.pop env in
-                bind env (Stackless.Convert (cvtop, v)) (Var.type_ v)
+                bind
+                  env
+                  (Stackless.Convert (cvtop, v))
+                  conversion_result_type
           end in
       transform_instrs env [] instrs
 
