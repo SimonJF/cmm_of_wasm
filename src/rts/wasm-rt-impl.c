@@ -287,3 +287,16 @@ u64 wasm_rt_trunc_u64_f64(f64 f) {
   return ((u64) f);
 }
 
+f32 wasm_rt_convert_f32_u32(u32 i) {
+  return ((f32) i);
+}
+f32 wasm_rt_convert_f32_u64(u64 i) {
+  return ((f32) i);
+}
+f64 wasm_rt_convert_f64_u32(u32 i) {
+  return ((f64) i);
+}
+f64 wasm_rt_convert_f64_u64(u64 i) {
+  return ((f64) i);
+}
+

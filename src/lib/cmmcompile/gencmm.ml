@@ -519,16 +519,12 @@ let compile_cvtop env op v =
             ri_var)))) in
 
     let truncate_unsigned_float is_float_32 =
-      let call_name =
-        (* There must be a prettier way of doing this... *)
-        match (is_32, is_float_32) with
-          | (true, true) -> "wasm_rt_trunc_u32_f32"
-          | (true, false)-> "wasm_rt_trunc_u32_f64"
-          | (false, true) -> "wasm_rt_trunc_u64_f32"
-          | (false, false) -> "wasm_rt_trunc_u64_f64" in
       (* We have to do an RTS call since CMM doesn't support unsigned
        * conversions. Hacker's Delight has some bit hackery, but they
        * don't work for the full range of values. *)
+      let cvt_to = if is_32 then "u32" else "u64" in
+      let cvt_from = if is_float_32 then "f32" else "f64" in
+      let call_name = Printf.sprintf "wasm_rt_trunc_%s_%s" cvt_to cvt_from in
       Cop (Cextcall (call_name, typ_int, false, None),
         [var], nodbg) in
 
@@ -553,61 +549,25 @@ let compile_cvtop env op v =
           call_int ("wasm_rt_reinterpret" ^ suffix) [var] in
 
   let compile_float_op ~is_32 =
-(*
-    let convert_signed_float is_float_32 =
-      (* Checks needed:
-       * - NaNs should trap
-       * - Any float greater than i32 max and less than i64 max should trap *)
-
-      let result_ident = Ident.create "result" in
-      let ri_var = Cvar result_ident in
-
-      let cmp_ident = Ident.create "cmp" in
-      let cmp_var = Cvar cmp_ident in
-
-      let (min, max) =
-        (* If integer (destination) is 32-bits, min and max need to be 32-bit
-         * MIN/MAX_INT *)
-        if is_32 then
-          let min = Cconst_float (Int32.to_float Int32.min_int) in
-          let max = Cconst_float (Int32.to_float Int32.max_int) in
-          (min, max)
-        else
-          let min = Cconst_float (Int64.to_float Int64.min_int) in
-          let max = Cconst_float (Int64.to_float Int64.max_int) in
-          (min, max) in
-      (* If float is 32 bits, we need to first promote it to 64 bits *)
-      let cmp =
-        if is_float_32 then f64_of_f32 var else var in
-      let max_op =
-        if is_32 && (not is_float_32) then CFgt else CFge in
-
-      Clet (cmp_ident, cmp,
-        Cifthenelse (is_nan cmp_var,
-          trap_int TrapInvalidConversion,
-          Clet (result_ident, int_of_float cmp_var,
-          Cifthenelse (
-              Cop (Cor, [
-                Cop (Ccmpf CFlt, [cmp_var; min], nodbg);
-                Cop (Ccmpf max_op, [cmp_var; max], nodbg)
-              ], nodbg),
-            trap_int TrapIntOverflow,
-            ri_var)))) in
-  *)
-
-
-
     let open Libwasm.Ast.FloatOp in
+
+    let convert_unsigned_int is_int_32 =
+      (* Again, we need to call the RTS to do these conversions :( *)
+      let cvt = if is_int_32 then unset_high_32 var else var in
+      let cvt_to = if is_32 then "f32" else "f64" in
+      let cvt_from = if is_int_32 then "u32" else "u64" in
+      let call_name = Printf.sprintf "wasm_rt_convert_%s_%s" cvt_to cvt_from in
+      Cop (Cextcall (call_name, typ_float, false, None), [cvt], nodbg) in
 
     function
       | ConvertSI32 ->
           let cvt = float_of_int (sign_extend_i32 var) in
           if is_32 then f32_of_f64 cvt else cvt
-      | ConvertUI32 -> unimplemented_float
+      | ConvertUI32 -> convert_unsigned_int true
       | ConvertSI64 ->
           let cvt = float_of_int var in
           if is_32 then f32_of_f64 cvt else cvt
-      | ConvertUI64 -> unimplemented_float
+      | ConvertUI64 -> convert_unsigned_int false
       | PromoteF32 -> f64_of_f32 var
       | DemoteF64 -> f32_of_f64 var
       | ReinterpretInt ->
