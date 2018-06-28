@@ -7,6 +7,7 @@ val create :
   locals:Var.t Util.Maps.Int32Map.t ->
   globals:Global.t Util.Maps.Int32Map.t ->
   functions:Func.t Util.Maps.Int32Map.t ->
+  types:Libwasm.Types.func_type Util.Maps.Int32Map.t ->
   t
 
 val continuation : t -> Label.t
@@ -36,6 +37,9 @@ val get_global : Libwasm.Ast.var -> t -> Global.t
 (* Functions *)
 val get_function : Libwasm.Ast.var -> t -> Func.t
 val with_continuation : Label.t -> t -> t
+
+(* Types *)
+val get_type : Libwasm.Ast.var -> t -> Libwasm.Types.func_type
 
 (* Debugging *)
 val dump_stack : t -> unit

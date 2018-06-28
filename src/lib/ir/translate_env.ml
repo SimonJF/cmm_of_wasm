@@ -7,10 +7,11 @@ type t = {
   locals: Var.t Int32Map.t;
   labels: Label.t list;
   globals: Global.t Int32Map.t;
-  functions: Func.t Int32Map.t
+  functions: Func.t Int32Map.t;
+  types: Libwasm.Types.func_type Int32Map.t
 }
 
-let create ~stack ~continuation ~return ~locals ~globals ~functions =
+let create ~stack ~continuation ~return ~locals ~globals ~functions ~types =
   {
   stack;
   block_continuation = continuation;
@@ -18,7 +19,8 @@ let create ~stack ~continuation ~return ~locals ~globals ~functions =
   labels = [continuation];
   locals;
   globals;
-  functions
+  functions;
+  types
 }
 
 let continuation env = env.block_continuation
@@ -92,3 +94,6 @@ let get_global (var: Libwasm.Ast.var) env =
 
 let get_function (var: Libwasm.Ast.var) env =
   Int32Map.find (var.it) env.functions
+
+let get_type (var: Libwasm.Ast.var) env =
+  Int32Map.find (var.it) env.types

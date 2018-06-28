@@ -463,8 +463,6 @@ let compile_unop env op v =
 let compile_cvtop env op v =
   let open Libwasm.Values in
   let var = Cvar (lv env v) in
-  let unimplemented_float = Cconst_float 0.0 in
-  let unimplemented_int = Cconst_int 0 in
   let call_float name args =
     Cop (Cextcall (name, typ_float, false, None), args, nodbg) in
   let call_int name args =

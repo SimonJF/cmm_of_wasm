@@ -205,7 +205,19 @@ let ir_term env instrs =
                 terminate (cont :: generated) (Stackless.Call {
                   func; args; cont = cont_branch
                 })
-            | CallIndirect var -> failwith "todo"
+            | CallIndirect var ->
+                let open Libwasm.Types in
+                let ty = Translate_env.get_type var env in
+                let (FuncType (arg_tys, ret_tys)) = ty in
+                let (func_id, env) = Translate_env.pop env in
+                let (args, env) = Translate_env.popn_rev (List.length arg_tys) env in
+                (* Capture current continuation *)
+                let (cont_lbl, cont) = capture_continuation env ret_tys false in
+                let cont_branch = Branch.create cont_lbl [] in
+                (* Terminate *)
+                terminate (cont :: generated) (Stackless.CallIndirect {
+                  type_ = ty; func = func_id; args; cont = cont_branch
+                })
             | GetLocal var ->
                 let open Translate_env in
                 let env = push (get_local var env) env in
@@ -291,7 +303,8 @@ let ir_func
     (functions: Func.t Util.Maps.Int32Map.t)
     (globs: Global.t Util.Maps.Int32Map.t)
     (ast_func: Libwasm.Ast.func)
-    (func_metadata: Func.t) =
+    (func_metadata: Func.t)
+    (type_map: Libwasm.Types.func_type Util.Maps.Int32Map.t) =
   let open Libwasm.Types in
   let func = ast_func.it in
   let (FuncType (arg_tys, ret_tys)) as fty =
@@ -311,6 +324,7 @@ let ir_func
       ~return:ret
       ~locals:Util.Maps.Int32Map.empty
       ~globals:globs
+      ~types:type_map
       ~functions:functions in
 
   (* Populate locals, and set them to their default values. *)
@@ -405,8 +419,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let funcs =
       List.fold_left (fun (i, acc) func ->
         let md = Int32Map.find i func_metadata_map in
-        (* Printf.printf "Compiling %s\n%!" ( match Func.name md with | Some x -> x | None -> "unnamed"); *)
-        let compiled_func = ir_func func_metadata_map globals func md in
+        let compiled_func = ir_func func_metadata_map globals func md types_map in
         let acc = Int32Map.add i (compiled_func, md) acc in
         (Int32.(add i one), acc)
       ) (0l, Int32Map.empty) ast_mod.funcs
@@ -424,6 +437,11 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         | [] -> None
         | x :: _ -> Some x.it.mtype in
     (* And for now, that should be it? *)
-    { funcs; globals; start ; memory_metadata; exports; data = data_defs }
+    { funcs;
+      globals;
+      start;
+      memory_metadata;
+      exports;
+      data = data_defs }
 
 
