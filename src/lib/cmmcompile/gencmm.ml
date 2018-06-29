@@ -676,7 +676,7 @@ let compile_terminator env =
         Clet (lbl_id,
           Cifthenelse (
             (* Test whether index exceeds bounds *)
-            Cop (Ccmpi Cge,
+            Cop (Ccmpa Cge,
               [Cvar idx; Cconst_int (List.length es)], nodbg),
             (* If so, return the default branch *)
             Cconst_int (default_id),
