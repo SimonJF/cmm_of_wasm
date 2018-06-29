@@ -175,12 +175,44 @@ let generate_cstub func =
           | Void -> assert false in
       Printf.sprintf "%s (result_asm)" result_register in
 
+  (*
+   *rax         0
+    rbx         1
+    rdi         2
+    rsi         3
+    rdx         4
+    rcx         5
+    r8          6
+    r9          7
+    r12         8
+    r13         9
+    r10         10
+    r11         11
+    rbp         12
+    r14         trap pointer
+    r15         allocation pointer *)
+  (* GCC moans about RBP being clobbered -- we need to handle it manually *)
+  let clobbered_registers =
+    ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "r8"; "r9"; "r12"; "r13"; "r10";
+     "r11"; "r14"; "r15"
+    ]
+    |> List.map (Printf.sprintf "\"%s\"")
+    |> String.concat ", " in
+
+  let push_registers =
+    "  asm (\"push %%rbp\\n\\t\" \"push %%rsi\" : );\n" in
+  (*
+  let pop_registers =
+    "  asm volatile(\"pop rbp\n\t\" \"pop rsi\");\n" in
+*)
+
 
   signature func ^ " {\n" ^
     defined_registers ^
     result_decl ^
-    (Printf.sprintf "  asm volatile(\"call %s\" : %s : "
-      (func.internal_name) result_assignment) ^
+    push_registers ^
+    (Printf.sprintf "  asm volatile(\"call %s\\n\\t\" \"pop %s\\n\\t\" \"pop %s\" : %s : "
+      (func.internal_name) "%%rsi" "%%rbp" result_assignment) ^
     formatted_register_map ^ " : \"memory\", \"cc\");\n" ^
     stable_result ^
     result_return ^ "}"
