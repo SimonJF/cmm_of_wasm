@@ -78,8 +78,10 @@ let int_registers =
     ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9";
      "r12"; "r13"; "r10"; "r11"; "rbp"]
 
+let max_float_registers = 16
+
 let float_register i =
-  if i > 14 then
+  if i > max_float_registers then
     failwith
       ("Error: cannot generate C stubs for functions " ^
        "with greater than 15 float arguments")
@@ -106,8 +108,17 @@ let generate_cstub func =
       *  c) Each integer argument goes into abc...
       *  d) Each float goes into xmm...
     * 3) C return of result type *)
+  (* Being slightly cheeky with mutability here -- it means we
+   * can still be tail-recursive and not have to do a state-passing
+   * transformation, but we can still get the unassigned int registers
+   * and float registers to mark them as clobbered *)
+  let unassigned_int_registers = ref [] in
+  let final_float_count = ref (-1) in
   let rec assign_registers int_registers float_count = function
-    | [] -> []
+    | [] ->
+        unassigned_int_registers := int_registers;
+        final_float_count := float_count;
+        []
     | (name, ty) :: xs when is_int_type ty ->
         let (reg, rest) = try_get_register int_registers in
         (name, ty, reg) :: assign_registers rest float_count xs
@@ -121,6 +132,24 @@ let generate_cstub func =
   let register_map =
     let args = func.args @ [(fuel_name, U32)] in
     assign_registers int_registers 0 args in
+
+  let clobbered_registers =
+    let result_register =
+      match func.ret_ty with
+        | U32 | U64 -> "rax" | F32 | F64 -> "xmm0" | _ -> "" in
+    (* RBP has to be handled specially. Additionally, the result register
+     * shouldn't appear in here either. *)
+    let include_in_clobber x =
+      if x = "rbp" || x = result_register then false else true in
+    let rec clobbered_float_registers i =
+      if i >= max_float_registers then []
+      else ("xmm" ^ (string_of_int i)) :: (clobbered_float_registers (i + 1)) in
+    !unassigned_int_registers @
+    (clobbered_float_registers !final_float_count) @ ["memory"; "cc"]
+    |> List.map (fun x -> if include_in_clobber x then [Printf.sprintf "\"%s\"" x] else [])
+    |> List.concat
+    |> String.concat "," in
+
 
   let defined_registers =
     let define_register (name, ty, reg) =
@@ -175,30 +204,6 @@ let generate_cstub func =
           | Void -> assert false in
       Printf.sprintf "%s (result_asm)" result_register in
 
-  (*
-   *rax         0
-    rbx         1
-    rdi         2
-    rsi         3
-    rdx         4
-    rcx         5
-    r8          6
-    r9          7
-    r12         8
-    r13         9
-    r10         10
-    r11         11
-    rbp         12
-    r14         trap pointer
-    r15         allocation pointer *)
-  (* GCC moans about RBP being clobbered -- we need to handle it manually *)
-  let clobbered_registers =
-    ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "r8"; "r9"; "r12"; "r13"; "r10";
-     "r11"; "r14"; "r15"
-    ]
-    |> List.map (Printf.sprintf "\"%s\"")
-    |> String.concat ", " in
-
   let push_registers =
     "  asm (\"push %%rbp\\n\\t\" \"push %%rsi\" : );\n" in
   (*
@@ -213,7 +218,8 @@ let generate_cstub func =
     push_registers ^
     (Printf.sprintf "  asm volatile(\"call %s\\n\\t\" \"pop %s\\n\\t\" \"pop %s\" : %s : "
       (func.internal_name) "%%rsi" "%%rbp" result_assignment) ^
-    formatted_register_map ^ " : \"memory\", \"cc\");\n" ^
+    formatted_register_map ^ " : " ^
+    clobbered_registers ^ ");\n" ^
     stable_result ^
     result_return ^ "}"
 
