@@ -1,8 +1,11 @@
-B ../../../_build/default/src/lib/ir
-B ../../../_build/default/src/lib/util
+B ../../../_build/default/src/lib/ir/.ir.objs
+B ../../../_build/default/src/lib/util/.util.objs
+B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/getopt
+B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/libwasm
+B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/ocaml
 FLG -open Ir -w -40
-PKG bigarray
-PKG getopt
-PKG libwasm
-PKG unix
+S .
 S ../util
+S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/getopt
+S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/libwasm
+S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/ocaml

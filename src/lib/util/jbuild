@@ -2,6 +2,6 @@
 
 (library
   ((name util)
-   (libraries (libwasm getopt))
+   (libraries (libwasm getopt str))
   )
 )
