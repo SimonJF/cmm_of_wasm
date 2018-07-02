@@ -588,7 +588,6 @@ let compile_type : Libwasm.Types.value_type -> machtype =
     | F32Type -> typ_float
     | F64Type -> typ_float
 
-
 let compile_expression env =
   let open Ir.Stackless in
   function

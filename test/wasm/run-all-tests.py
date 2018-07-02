@@ -7,16 +7,14 @@ import os.path
 import pathlib
 import subprocess
 
-WASM_TEST_DIR = os.path.abspath("../external/testsuite")
+WASM_TEST_DIR = os.path.abspath("../../external/testsuite")
 STDOUT_NAME = "test_stdout.txt"
 STDERR_NAME = "test_stderr.txt"
 
 
 disabled = [
-    # Relies on floats for loop bounds in one test and thus infinite loops.
-    # Remove when floats are implemented.
-    #  "loop.wast",
-    ]
+        # none at the moment
+]
 
 
 def write_file(filename, contents):

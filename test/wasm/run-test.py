@@ -33,7 +33,7 @@ import utils
 from utils import Error
 
 TEST_DIR = os.path.dirname(os.path.abspath(__file__))
-ROOT_DIR = os.path.abspath(os.path.join(TEST_DIR, '..'))
+ROOT_DIR = os.path.abspath(os.path.join(TEST_DIR, '..', '..'))
 WASMRT_DIR = os.path.join(ROOT_DIR, 'src', 'rts')
 INCLUDES_DIR = os.path.join(ROOT_DIR, 'includes')
 EXTERNAL_BINDIR = os.path.join(ROOT_DIR, 'external', 'bin')
