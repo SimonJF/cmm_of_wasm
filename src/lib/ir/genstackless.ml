@@ -379,7 +379,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let func_metadata_map =
       List.fold_left (fun (i, acc) (func: Libwasm.Ast.func) ->
         let ty = Int32Map.find (func.it.ftype.it) types_map in
-        let md = Func.create ty in
+        let md = Func.create_defined ty in
         (Int32.(add i one), Int32Map.add i md acc))
       (0l, Int32Map.empty) ast_mod.funcs |> snd in
 
