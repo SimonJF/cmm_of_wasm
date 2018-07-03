@@ -58,6 +58,12 @@ let global_symbol env glob =
   env.module_name ^ "_Global" ^
     Ir.Global.(id glob |> Id.to_string)
 
+let table_count_symbol env =
+  env.module_name ^ "_TableCount"
+
+let table_symbol env =
+  env.module_name ^ "_Table"
+
 let dump env =
   let open Ir in
 

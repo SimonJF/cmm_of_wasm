@@ -30,7 +30,6 @@ let trap_ty =
     | I32Type | I64Type -> typ_int
     | F32Type | F64Type -> typ_float
 
-
 (* Traps don't return. But to successfully create join points
  * where one join ends in a trap (for example, memory bounds checks),
  * we need to ensure that the right register type is specified in the
@@ -42,6 +41,11 @@ let trap ty reason =
 let trap_int = trap typ_int
 let trap_float = trap typ_int
 
-
-
+let trap_function_ty tys reason =
+  let trap_ty =
+    match tys with
+      | [] -> typ_void
+      | [ty] -> trap_ty ty
+      | _ -> assert false in
+  trap trap_ty reason
 

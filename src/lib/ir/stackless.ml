@@ -56,14 +56,19 @@ type data = {
   contents: string
 }
 
+type table =
+  | LocalTable of (Int32.t Libwasm.Types.limits)
+  | ImportedTable of (string * (Int32.t Libwasm.Types.limits))
+
 type module_ = {
     funcs : (func * Func.t) Util.Maps.Int32Map.t;
     globals: Global.t Util.Maps.Int32Map.t;
     start : Func.t option;
     memory_metadata: Libwasm.Types.memory_type option;
-    (* TODO: Fill the rest of this in *)
     exports : Libwasm.Ast.export list;
-    data : data list
+    data : data list;
+    table: table;
+    table_elems : Func.t Util.Maps.Int32Map.t
 }
 
 let lookup_function (ir_mod: module_) (v: Libwasm.Ast.var) =

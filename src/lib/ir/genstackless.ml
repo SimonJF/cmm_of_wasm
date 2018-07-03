@@ -416,7 +416,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
       ) func_metadata_map ast_mod.exports in
 
     (* Next up, add all of the data definitions *)
-    let data_defs =
+    let data =
       let open Libwasm.Ast in
       let open Libwasm.Values in
       List.map (fun (data_seg: string segment) ->
@@ -449,12 +449,42 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
       match ast_mod.memories with
         | [] -> None
         | x :: _ -> Some x.it.mtype in
+
+    (* FIXME: Need to take imported tables into account *)
+    let table =
+      let open Libwasm.Types in
+      match ast_mod.tables with
+        | [] -> LocalTable { min = 0l; max = None}
+        | [t] ->
+            let TableType (limits, _) = t.it.ttype in
+            LocalTable limits
+        | _ -> failwith "Multiple tables unsupported." in
+
+    let table_elems =
+      let open Util.Maps in
+      let process_segment elems (seg: Libwasm.Ast.table_segment) =
+        let seg = seg.it in
+        (* First, reify offset to an OCaml int32 *)
+        let offset =
+          (value_of_const globals seg.offset.it)
+          |> Libwasm.Values.I32Value.of_value in
+        (* Now, we can populate the elems map *)
+        let vars_list = seg.init in
+        List.fold_left (fun (i, acc) var ->
+          let idx = Int32.add i offset in
+          let func = Int32Map.find var.it funcs |> snd in
+          let new_elems = Int32Map.add idx func acc in
+          (Int32.(add i one), new_elems)) (Int32.zero, elems) vars_list |> snd in
+      List.fold_left (process_segment) Int32Map.empty (ast_mod.elems) in
+
     (* And for now, that should be it? *)
     { funcs;
       globals;
       start;
       memory_metadata;
       exports;
-      data = data_defs }
+      data;
+      table;
+      table_elems }
 
 

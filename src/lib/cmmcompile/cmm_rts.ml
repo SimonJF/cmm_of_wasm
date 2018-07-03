@@ -191,3 +191,46 @@ module Globals = struct
       let chunk = Memory.chunk_of_type ty in
       Cop (Cload (chunk, Mutable), [symbol], nodbg)
 end
+
+module Tables = struct
+  let count env =
+    let symb = Cconst_symbol (Compile_env.table_count_symbol env) in
+    Cop (Cload (Word_int, Immutable), [symb], nodbg)
+
+  (* Precondition: function ID is normalised (i.e., top 32 bits cleared *)
+  let function_offset func_id =
+    Cop (Cmuli, [func_id; Cconst_int Arch.size_int], nodbg)
+
+  let function_hash env func_id =
+    let root_symb = Cconst_symbol (Compile_env.table_symbol env) in
+    let address = Cop (Caddi, [root_symb; function_offset func_id], nodbg) in
+    (* Alas, this must be mutable -- loading other modules may change it *)
+    Cop (Cload (Word_int, Mutable), [address], nodbg)
+
+  let function_pointer env func_id =
+    let root_symb = Cconst_symbol (Compile_env.table_symbol env) in
+    let pointer_offset =
+      Cop (Caddi, [function_offset func_id; Cconst_int Arch.size_int], nodbg) in
+    let address = Cop (Caddi, [root_symb; function_offset func_id], nodbg) in
+    Cop (Cload (Word_int, Mutable), [address], nodbg)
+
+  let set_table_entry env func_id hash function_name =
+    let root_symb = Cconst_symbol (Compile_env.table_symbol env) in
+    let offset = function_offset func_id in
+    let pointer_offset =
+      Cop (Caddi, [function_offset func_id; Cconst_int Arch.size_int], nodbg) in
+    let hash_address =
+      Cop (Caddi, [root_symb; offset], nodbg) in
+    let pointer_address =
+      Cop (Caddi, [root_symb; pointer_offset], nodbg) in
+    let store_hash =
+      Cop (Cstore (Word_int, Assignment),
+        [hash_address; Cconst_natint hash], nodbg) in
+    let store_pointer =
+      Cop (Cstore (Word_int, Assignment),
+        [pointer_address; Cconst_symbol function_name], nodbg) in
+    Csequence (store_hash, store_pointer)
+
+
+end
+

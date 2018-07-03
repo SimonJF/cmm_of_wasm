@@ -78,12 +78,6 @@ let is_nan x  =
     nodbg
   )
 
-let is_infinity x =
-  Cop (Cor,
-      [ Cop (Ccmpf CFeq, [x; Cconst_float (infinity)], nodbg);
-        Cop (Ccmpf CFeq, [x; Cconst_float (neg_infinity)], nodbg)], nodbg)
-
-
 (* Compilation *)
 
 (* Cmm_of_wasm assumes a 64-bit host and target architecture. I do not intend
@@ -654,6 +648,31 @@ let compile_terminator env =
     else
       let br_id = Compile_env.lookup_label (Branch.label b) env in
       Cexit (br_id, args) in
+  let call fn_addr ret_tys args cont =
+    (* Calculate new fuel *)
+      let new_fuel = Cop (Csubi, [Cvar fuel_ident; Cconst_int 1], nodbg) in
+      let args_cvars = (List.map (fun v -> Cvar (lv env v)) args) @ [new_fuel] in
+      let br_id = Compile_env.lookup_label (Branch.label cont) env in
+      let branch_args = Branch.arguments cont in
+      let cont_args_cvars =
+        (List.map (fun v -> Cvar (lv env v)) branch_args) in
+      (* No return values: typ_void in call, csequence, and branch args *)
+      let compile_noreturn =
+        let call = Cop (Capply typ_void, fn_addr :: args_cvars, nodbg) in
+        Csequence (call, Cexit (br_id, cont_args_cvars)) in
+      (* One return value: let-composition, result goes on head of args *)
+      let compile_return1 ty =
+        let call =
+          Cop (Capply (compile_type ty), fn_addr :: args_cvars, nodbg) in
+        let fresh_id = Ident.create ("_call") in
+        Clet (fresh_id, call,
+          Cexit (br_id, (Cvar fresh_id) :: cont_args_cvars)) in
+      begin
+        match ret_tys with
+          | [] -> compile_noreturn
+          | [ty] -> compile_return1 ty
+          | _ -> assert false
+      end in
   function
     | Unreachable ->
         (* FIXME: Dodgy. We'll need some more info to decide whether to
@@ -692,45 +711,36 @@ let compile_terminator env =
         let false_branch = branch ifnot in
         Cifthenelse (test, true_branch, false_branch)
     | Call { func ; args; cont } ->
-        (* Alright. We have a function, set of args, and a
-         * continuation branch, pre-populated with some args.
-         * In addition, the continuation will take the return
-         * type(s) of the function, so should be prepended.
-         * ...I think? *)
         let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
-        (* Calculate new fuel *)
-        let new_fuel = Cop (Csubi, [Cvar fuel_ident; Cconst_int 1], nodbg) in
-        let args_cvars = (List.map (fun v -> Cvar (lv env v)) args) @ [new_fuel] in
         (* Lookup function symbol from table *)
         let symbol_name = Compile_env.lookup_func_symbol func env |> Symbol.name in
         let fn_symbol = Cconst_symbol symbol_name in
-        (* Cop (Capply <return type>, <args>, dbg) *)
-        let br_id = Compile_env.lookup_label (Branch.label cont) env in
-        let branch_args = Branch.arguments cont in
-        let cont_args_cvars =
-          (List.map (fun v -> Cvar (lv env v)) branch_args) in
-        (* No return values: typ_void in call, csequence, and branch args *)
-        let compile_noreturn =
-          let call = Cop (Capply typ_void, fn_symbol :: args_cvars, nodbg) in
-          Csequence (call, Cexit (br_id, cont_args_cvars)) in
-        (* One return value: let-composition, result goes on head of args *)
-        let compile_return1 ty =
-          let call =
-            Cop (Capply (compile_type ty), fn_symbol :: args_cvars, nodbg) in
-          let fresh_id = Ident.create ("_call" ^ symbol_name) in
-          Clet (fresh_id, call,
-            Cexit (br_id, (Cvar fresh_id) :: cont_args_cvars)) in
-        begin
-          match ret_tys with
-            | [] -> compile_noreturn
-            | [ty] -> compile_return1 ty
-            | _ ->
-                failwith ("Can't currently compile functions with "
-                  ^ "more than one return type")
-        end
+        call fn_symbol ret_tys args cont
     | CallIndirect { type_; func; args; cont } ->
-        (* TODO: implement *)
-        Ctuple []
+        (* Normalise function index *)
+        let func_ident = Ident.create "func_id" in
+        let func_var = Cvar func_ident in
+        let func = unset_high_32 (Cvar (lv env func)) in
+        let FuncType (_arg_tys, ret_tys) = type_ in
+
+        let in_bounds =
+          let table_size = Cmm_rts.Tables.count env in
+          Cop (Ccmpa Cgt, [func_var; table_size], nodbg) in
+
+        let hashes_match =
+          let this_hash = Util.Type_hashing.hash_function_type type_ in
+          let that_hash = Cmm_rts.Tables.function_hash env func in
+          Cop (Ccmpa Ceq, [Cconst_natint this_hash; that_hash], nodbg) in
+
+        Clet (func_ident, func,
+          Cifthenelse (
+            in_bounds,
+            Cifthenelse (hashes_match,
+              call (Cmm_rts.Tables.function_pointer env func_var) ret_tys args cont,
+              trap_function_ty ret_tys TrapCallIndirect),
+            trap_function_ty ret_tys TrapCallIndirect
+          )
+        )
 
 (* compile_body: env -> W.terminator -> W.statement list -> Cmm.expression *)
 let rec compile_body env terminator = function
@@ -884,6 +894,15 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
             Clet (root_ident, root, init_data))
       | None -> Ctuple [] in
 
+  (* Initialise the table with elements *)
+  let table_body =
+    Util.Maps.Int32Map.fold (fun idx func acc ->
+      let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
+      let symb = Compile_env.lookup_func_symbol func env |> Symbol.name in
+      let cmm_idx = Cconst_natint (Nativeint.of_int32 idx) in
+      Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx hash symb, acc)
+    ) ir_mod.table_elems (Ctuple []) in
+
   let start_body =
     match ir_mod.start with
       | Some md ->
@@ -894,7 +913,21 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
           Cop (Capply typ_void, [fn_symbol], nodbg)
       | _ -> Ctuple [] in
 
-  let body = Csequence (memory_body, start_body) in
+  (* Sequence all instructions. Later passes perform the `() ; M ~~> M`
+   * and `M ; () ~~> M` translations, so we don't have to worry about unit
+   * values floating around. *)
+  let init_instrs = [
+    memory_body;
+    table_body;
+    start_body
+  ] in
+
+  let body =
+    List.fold_left
+      (fun x acc -> Csequence (x, acc))
+      (Ctuple [])
+      init_instrs in
+
   Cfunction {
     fun_name = name_prefix ^ "init";
     fun_args = [];
@@ -943,6 +976,50 @@ let module_globals env (ir_mod: Stackless.module_) =
   |> List.concat
 
 
+(* Initial thought was that we could initialise table just like this.
+ * We might be able to, to an extent, as an optimisation. For now,
+ * we're initialising everything at runtime in the `init` function,
+ * which will help with inter-module linking, which may overwrite
+ * table entries. *)
+(* Instead, though, we can allocate the space. *)
+(*
+let module_function_table :
+  Compile_env.t ->
+  Stackless.module_ ->
+  Cmm.data_item list = fun env ir_mod ->
+    let funcs = ir_mod.function_table in
+    let table_entries =
+      List.map (fun func ->
+        let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
+        let symb = Compile_env.lookup_func_symbol func env |> Symbol.name in
+        Cint hash :: Csymbol_address symb
+      ) funcs
+      |> List.concat in
+    (* Export both table count and table since they will be needed for linking *)
+    (* It's useful to have a table size as a native int even if it's probably a
+     * lot shorter than that for reasons of alignment. *)
+    global_symbol (Compile_env.table_count_symbol) @
+      [Cint (Nativeint.of_int List.length funcs)] @
+      global_symb (Compile_env.table_symbol) @
+      table_entries in
+*)
+
+let module_function_table env (ir_mod: Stackless.module_) =
+  let ir_table = ir_mod.table in
+  let global_symbol symb = [Cglobal_symbol symb; Cdefine_symbol symb] in
+
+  match ir_table with
+    | LocalTable limits ->
+        (* Table size: int size * 2 * (limits.min) *)
+        (* Right now, it's safe to assume that the table size is static
+         * throughout execution, since we don't provide a runtime embedder API
+         * to resize the table. Thus, we may ignore the `max` field. *)
+        let table_size = Arch.size_int * 2 * (Int32.to_int limits.min) in
+        global_symbol (Compile_env.table_count_symbol env) @
+        [Cint (Nativeint.of_int32 limits.min);
+         Cskip (table_size)]
+    | ImportedTable (module_name, limits) -> failwith "todo"
+
 (* IR function to CMM phrase list *)
 let compile_module name (ir_mod: Stackless.module_) =
   let sanitised_name = (Util.Names.sanitise name) in
@@ -952,9 +1029,11 @@ let compile_module name (ir_mod: Stackless.module_) =
   let (data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in
   let global_data = module_globals env ir_mod in
+  let table = module_function_table env ir_mod in
   (* Memory symbol: needs 3 words of space to store struct created by RTS *)
+  let struct_size = Arch.size_int * 3 in
   let data =
-    Cdata ([Cdefine_symbol memory_symbol_name; Cskip 24] @ data @ global_data) in
+    Cdata ([Cdefine_symbol memory_symbol_name; Cskip struct_size] @ data @ global_data @ table) in
   let funcs = compile_functions env ir_mod @ [init] in
   funcs @ [data]
 

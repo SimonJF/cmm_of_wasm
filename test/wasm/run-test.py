@@ -369,6 +369,9 @@ def main(args):
   parser.add_argument('-m', '--mangle',
                       help='mangle names',
                       action='store_true')
+  parser.add_argument('-t', '--keep-temp',
+                      help='keep temporary files',
+                      action='store_true')
   parser.add_argument('file', help='wast file.')
   options = parser.parse_args(args)
 
@@ -415,7 +418,11 @@ def main(args):
 
     for i, wasm_filename in enumerate(cwriter.GetModuleFilenames()):
       chopped_filename = os.path.splitext(os.path.basename(wasm_filename))[0]
-      cmm_of_wasm.RunWithArgs('-o', chopped_filename, wasm_filename, cwd=out_dir)
+      if options.keep_temp:
+          cmm_of_wasm.RunWithArgs('-o', chopped_filename, wasm_filename, '-tv', cwd=out_dir)
+      else:
+          cmm_of_wasm.RunWithArgs('-o', chopped_filename, wasm_filename, cwd=out_dir)
+
       o_filenames.append(chopped_filename + '.o')
 
     if options.compile:
