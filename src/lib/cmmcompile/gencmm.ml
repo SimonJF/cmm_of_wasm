@@ -735,7 +735,7 @@ let compile_terminator env =
 
         let in_bounds =
           let table_size = Cmm_rts.Tables.count env in
-          Cop (Ccmpa Cgt, [func_var; table_size], nodbg) in
+          Cop (Ccmpa Clt, [func_var; table_size], nodbg) in
 
         let hashes_match =
           let this_hash = Util.Type_hashing.hash_function_type type_ in
