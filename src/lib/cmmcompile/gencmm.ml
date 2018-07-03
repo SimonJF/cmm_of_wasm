@@ -648,7 +648,23 @@ let compile_terminator env =
     else
       let br_id = Compile_env.lookup_label (Branch.label b) env in
       Cexit (br_id, args) in
-  let call fn_addr ret_tys args cont =
+
+  let local_call_noreturn fn_addr =
+      (* No return values: typ_void in call, csequence, and branch args *)
+    fun args_cvars br_id cont_args_cvars ->
+      let call = Cop (Capply typ_void, fn_addr :: args_cvars, nodbg) in
+      Csequence (call, Cexit (br_id, cont_args_cvars)) in
+
+  let local_call_return1 fn_addr =
+    fun args_cvars br_id cont_args_cvars ty ->
+      let call =
+        Cop (Capply (compile_type ty), fn_addr :: args_cvars, nodbg) in
+      Cexit (br_id, call :: cont_args_cvars) in
+
+  let import_call_noreturn () = failwith "TODO" in
+  let import_call_return1 () = failwith "TODO" in
+
+  let call fn_noreturn fn_return1 ret_tys args cont =
     (* Calculate new fuel *)
       let new_fuel = Cop (Csubi, [Cvar fuel_ident; Cconst_int 1], nodbg) in
       let args_cvars = (List.map (fun v -> Cvar (lv env v)) args) @ [new_fuel] in
@@ -656,23 +672,11 @@ let compile_terminator env =
       let branch_args = Branch.arguments cont in
       let cont_args_cvars =
         (List.map (fun v -> Cvar (lv env v)) branch_args) in
-      (* No return values: typ_void in call, csequence, and branch args *)
-      let compile_noreturn =
-        let call = Cop (Capply typ_void, fn_addr :: args_cvars, nodbg) in
-        Csequence (call, Cexit (br_id, cont_args_cvars)) in
       (* One return value: let-composition, result goes on head of args *)
-      let compile_return1 ty =
-        let call =
-          Cop (Capply (compile_type ty), fn_addr :: args_cvars, nodbg) in
-        let fresh_id = Ident.create ("_call") in
-        Clet (fresh_id, call,
-          Cexit (br_id, (Cvar fresh_id) :: cont_args_cvars)) in
-      begin
-        match ret_tys with
-          | [] -> compile_noreturn
-          | [ty] -> compile_return1 ty
-          | _ -> assert false
-      end in
+      match ret_tys with
+        | [] -> fn_noreturn args_cvars br_id cont_args_cvars
+        | [ty] -> fn_return1 args_cvars br_id cont_args_cvars ty
+        | _ -> assert false in
   function
     | Unreachable ->
         (* FIXME: Dodgy. We'll need some more info to decide whether to
@@ -712,10 +716,16 @@ let compile_terminator env =
         Cifthenelse (test, true_branch, false_branch)
     | Call { func ; args; cont } ->
         let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
+        (* FIXME: Incorporate imported functions here *)
         (* Lookup function symbol from table *)
         let symbol_name = Compile_env.lookup_func_symbol func env |> Symbol.name in
         let fn_symbol = Cconst_symbol symbol_name in
-        call fn_symbol ret_tys args cont
+        call
+          (local_call_noreturn fn_symbol)
+          (local_call_return1 fn_symbol)
+          ret_tys
+          args
+          cont
     | CallIndirect { type_; func; args; cont } ->
         (* Normalise function index *)
         let func_ident = Ident.create "func_id" in
@@ -736,7 +746,14 @@ let compile_terminator env =
           Cifthenelse (
             in_bounds,
             Cifthenelse (hashes_match,
-              call (Cmm_rts.Tables.function_pointer env func_var) ret_tys args cont,
+              call
+                (local_call_noreturn @@
+                  Cmm_rts.Tables.function_pointer env func_var)
+                (local_call_return1 @@
+                  Cmm_rts.Tables.function_pointer env func_var)
+                ret_tys
+                args
+                cont,
               trap_function_ty ret_tys TrapCallIndirect),
             trap_function_ty ret_tys TrapCallIndirect
           )
