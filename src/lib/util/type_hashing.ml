@@ -35,5 +35,10 @@ let hash_function_type fn_ty =
 
   (* Starting at position 1 (i.e., << 3) since we need to account for recording
    * the return type *)
-  go 1 x arg_tys
+  let x = go 1 x arg_tys in
+  (* Finally, we set the high bit to indicate that this slot in the function
+   * table has been initialised, distinguishing the hash from that for
+   * void -> void *)
+  Nativeint.logor x (Nativeint.of_string "0x8000000000000000")
+
 
