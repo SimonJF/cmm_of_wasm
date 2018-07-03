@@ -13,7 +13,7 @@ STDERR_NAME = "test_stderr.txt"
 
 
 disabled = [
-        # none at the moment
+  "names.wast"
 ]
 
 

@@ -661,8 +661,20 @@ let compile_terminator env =
         Cop (Capply (compile_type ty), fn_addr :: args_cvars, nodbg) in
       Cexit (br_id, call :: cont_args_cvars) in
 
-  let import_call_noreturn () = failwith "TODO" in
-  let import_call_return1 () = failwith "TODO" in
+  let import_call_noreturn name =
+    fun args_cvars br_id cont_args_cvars ->
+      let call =
+        Cop (Cextcall (name, typ_void, false, None),
+          args_cvars, nodbg) in
+      Csequence (call, Cexit (br_id, cont_args_cvars)) in
+
+  let import_call_return1 name =
+    fun args_cvars br_id cont_args_cvars ty ->
+      let call =
+        Cop (Cextcall (name, compile_type ty, false, None),
+          args_cvars, nodbg) in
+      Cexit (br_id, call :: cont_args_cvars) in
+
 
   let call fn_noreturn fn_return1 ret_tys args cont =
     (* Calculate new fuel *)
@@ -718,14 +730,28 @@ let compile_terminator env =
         let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
         (* FIXME: Incorporate imported functions here *)
         (* Lookup function symbol from table *)
-        let symbol_name = Compile_env.lookup_func_symbol func env |> Symbol.name in
-        let fn_symbol = Cconst_symbol symbol_name in
-        call
-          (local_call_noreturn fn_symbol)
-          (local_call_return1 fn_symbol)
-          ret_tys
-          args
-          cont
+        if Func.is_imported func then
+          begin
+            let name =
+              match Func.name func with
+                | Some x -> x
+                | None ->
+                    (* name will always be set on an imported function *)
+                    assert false in
+            call
+              (import_call_noreturn name)
+              (import_call_return1 name)
+              ret_tys args cont
+          end
+        else
+          begin
+            let symbol_name = Compile_env.lookup_func_symbol func env |> Symbol.name in
+            let fn_symbol = Cconst_symbol symbol_name in
+            call
+              (local_call_noreturn fn_symbol)
+              (local_call_return1 fn_symbol)
+              ret_tys args cont
+          end
     | CallIndirect { type_; func; args; cont } ->
         (* Normalise function index *)
         let func_ident = Ident.create "func_id" in

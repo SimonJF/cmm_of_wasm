@@ -93,6 +93,11 @@ module Map = struct
     Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
 end
 
+let is_imported f =
+  match f with
+    | DefinedFunction _ -> false
+    | ImportedFunction _ -> true
+
 let with_name f name =
   match f with
     | DefinedFunction { core_info } ->
