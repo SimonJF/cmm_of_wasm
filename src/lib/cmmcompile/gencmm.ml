@@ -1016,8 +1016,9 @@ let module_function_table env (ir_mod: Stackless.module_) =
          * to resize the table. Thus, we may ignore the `max` field. *)
         let table_size = Arch.size_int * 2 * (Int32.to_int limits.min) in
         global_symbol (Compile_env.table_count_symbol env) @
-        [Cint (Nativeint.of_int32 limits.min);
-         Cskip (table_size)]
+        [Cint (Nativeint.of_int32 limits.min)] @
+        global_symbol (Compile_env.table_symbol env) @
+        [Cskip (table_size)]
     | ImportedTable (module_name, limits) -> failwith "todo"
 
 (* IR function to CMM phrase list *)
