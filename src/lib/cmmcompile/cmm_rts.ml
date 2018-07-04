@@ -211,7 +211,7 @@ module Tables = struct
     let root_symb = Cconst_symbol (Compile_env.table_symbol env) in
     let pointer_offset =
       Cop (Caddi, [function_offset func_id; Cconst_int Arch.size_int], nodbg) in
-    let address = Cop (Caddi, [root_symb; function_offset func_id], nodbg) in
+    let address = Cop (Caddi, [root_symb; pointer_offset], nodbg) in
     Cop (Cload (Word_int, Mutable), [address], nodbg)
 
   let set_table_entry env func_id hash function_name =
