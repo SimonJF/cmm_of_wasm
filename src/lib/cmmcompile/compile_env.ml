@@ -59,8 +59,12 @@ let memory_symbol env =
   env.memory_module_name ^ "_Memory"
 
 let global_symbol env glob =
-  env.module_name ^ "_Global" ^
-    Ir.Global.(id glob |> Id.to_string)
+  match Global.data glob with
+    | DefinedGlobal _ ->
+        env.module_name ^ "_Global" ^
+          Ir.Global.(id glob |> Id.to_string)
+    | ImportedGlobal { module_name; global_name } ->
+        module_name ^ "_GlobalExport_" ^ global_name
 
 let table_count_symbol env =
   env.table_module_name ^ "_TableCount"

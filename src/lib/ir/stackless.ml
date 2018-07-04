@@ -52,7 +52,7 @@ type func = {
 }
 
 type data = {
-  offset: int64;
+  offset: expr;
   contents: string
 }
 
@@ -73,7 +73,7 @@ type module_ = {
     exports : Libwasm.Ast.export list;
     data : data list;
     table: table;
-    table_elems : Func.t Util.Maps.Int32Map.t
+    table_elems : (expr * Func.t Util.Maps.Int32Map.t) list (* Expr: offset *)
 }
 
 let lookup_function (ir_mod: module_) (v: Libwasm.Ast.var) =

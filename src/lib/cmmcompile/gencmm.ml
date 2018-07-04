@@ -588,16 +588,30 @@ let compile_expression env =
   | Select { cond ; ifso ; ifnot } ->
       Cifthenelse (Cvar (lv env cond), Cvar(lv env ifso), Cvar(lv env ifnot))
   | GetGlobal g ->
-      (* If global is mutable, then we need to read from
-       * its associated symbol. *)
-      if Global.is_mutable g then
-        let symbol =
-          Cconst_symbol (Compile_env.global_symbol env g) in
-        Cmm_rts.Globals.get ~symbol ~ty:(Global.type_ g)
-      else
-        (* If it's immutable, we may simply return its (compiled) initial
-         * value. *)
-        compile_value (Global.initial_value g)
+      begin
+        let load_global g =
+          let symbol =
+            Cconst_symbol (Compile_env.global_symbol env g) in
+          Cmm_rts.Globals.get ~symbol ~ty:(Global.type_ g) in
+
+        match Global.data g with
+          | DefinedGlobal { _; initial_value = Constant v} ->
+            (* If global is mutable, then we need to read from
+             * its associated symbol. *)
+            if Global.is_mutable g then load_global g
+            else
+              (* If it's immutable, we may simply return its (compiled) initial
+               * value. *)
+              compile_value v
+          | DefinedGlobal { _; initial_value = AnotherGlobal g } ->
+              (* If we're referencing another global, then we know by
+               * the specification that the other global *must* be an
+               * imported global. *)
+              load_global g
+          | ImportedGlobal _ ->
+              (* If we're referencing an imported global, we load that. *)
+              load_global g
+      end
   | Load (loadop, v) ->
       Cmm_rts.Memory.load
         ~root:(Cconst_symbol (Compile_env.memory_symbol env))
@@ -893,6 +907,11 @@ let compile_functions env (ir_mod: Stackless.module_) =
 
 let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
+  let rec call_seq =
+    List.fold_left (fun acc x -> Csequence (x, acc)) (Ctuple []) in
+
+  (* TODO: Memcpy all of the globals here!!!!! *)
+
   let memory_body =
     let open Libwasm.Types in
     let root_ident = Ident.create "data_root" in
@@ -900,16 +919,10 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
       (* Generate memcpy calls to initialise memory *)
       let memcpy (symb, offset, size) =
         let addr = Cop (Caddi,
-          [Cvar root_ident;
-           Cconst_natint (Int64.to_nativeint offset)], nodbg) in
+          [Cvar root_ident; compile_expression env offset], nodbg) in
         Cop (Cextcall ("memcpy", typ_void, false, None),
           [addr; Cconst_symbol symb; Cconst_int size], nodbg) in
-
-      let rec call_seq calls =
-        match calls with
-          | [] -> Ctuple []
-          | x :: xs -> Csequence (x, call_seq xs) in
-      call_seq (List.map (memcpy) data_info) in
+        call_seq (List.map (memcpy) data_info) in
 
     match ir_mod.memory_metadata with
       | NoMemory -> Ctuple []
@@ -944,12 +957,16 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
 
   (* Initialise the table with elements *)
   let table_body =
-    Util.Maps.Int32Map.fold (fun idx func acc ->
-      let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
-      let symb = Compile_env.lookup_func_symbol func env |> Symbol.name in
-      let cmm_idx = Cconst_natint (Nativeint.of_int32 idx) in
-      Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx hash symb, acc)
-    ) ir_mod.table_elems (Ctuple []) in
+    let compile_elem (offset, elem_map) =
+      Util.Maps.Int32Map.fold (fun idx func acc ->
+        let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
+        let symb = Compile_env.lookup_func_symbol func env |> Symbol.name in
+        let cmm_idx =
+          Cop (Caddi, [compile_expression env offset;
+            Cconst_natint (Nativeint.of_int32 idx)], nodbg) in
+        Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx hash symb, acc)
+      ) elem_map (Ctuple []) in
+    List.map (compile_elem) ir_mod.table_elems |> call_seq in
 
   let start_body =
     match ir_mod.start with
@@ -970,11 +987,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
     start_body
   ] in
 
-  let body =
-    List.fold_left
-      (fun x acc -> Csequence (x, acc))
-      (Ctuple [])
-      init_instrs in
+  let body = call_seq init_instrs in
 
   Cfunction {
     fun_name = name_prefix ^ "init";
@@ -1006,6 +1019,7 @@ let module_data name (ir_mod: Stackless.module_) =
 
 
 (* TODO: Handle exported globals *)
+(* NEXT UP: This needs modifying to new global representation *)
 let module_globals env (ir_mod: Stackless.module_) =
   let open Libwasm.Values in
   let open Util.Maps in
