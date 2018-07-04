@@ -199,7 +199,7 @@ module Tables = struct
 
   (* Precondition: function ID is normalised (i.e., top 32 bits cleared *)
   let function_offset func_id =
-    Cop (Cmuli, [func_id; Cconst_int Arch.size_int], nodbg)
+    Cop (Cmuli, [func_id; Cconst_int (2 * Arch.size_int)], nodbg)
 
   let function_hash env func_id =
     let root_symb = Cconst_symbol (Compile_env.table_symbol env) in
