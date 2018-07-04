@@ -4,16 +4,20 @@ type t = {
   label_count : int;
   func_symbols : Symbol.symbol Ir.Func.Map.t;
   func_count : int;
-  module_name : string
+  module_name : string;
+  memory_module_name : string; (* Name of module containing memory *)
+  table_module_name : string; (* Name of module containing table *)
 }
 
-let empty module_name = {
+let empty ~module_name ~memory_module_name ~table_module_name = {
   var_env = Ir.Var.Map.empty;
   label_env = Ir.Label.Id.Map.empty;
   label_count = 0;
   func_count = 0;
   func_symbols = Ir.Func.Map.empty;
-  module_name = module_name;
+  module_name;
+  memory_module_name;
+  table_module_name
 }
 
 let bind_var v i env = {
@@ -52,17 +56,17 @@ let symbols env =
   List.map snd (Ir.Func.Map.bindings env.func_symbols)
 
 let memory_symbol env =
-  env.module_name ^ "_Memory"
+  env.memory_module_name ^ "_Memory"
 
 let global_symbol env glob =
   env.module_name ^ "_Global" ^
     Ir.Global.(id glob |> Id.to_string)
 
 let table_count_symbol env =
-  env.module_name ^ "_TableCount"
+  env.table_module_name ^ "_TableCount"
 
 let table_symbol env =
-  env.module_name ^ "_Table"
+  env.table_module_name ^ "_Table"
 
 let dump env =
   let open Ir in

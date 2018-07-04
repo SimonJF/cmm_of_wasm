@@ -894,29 +894,35 @@ let compile_functions env (ir_mod: Stackless.module_) =
 let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
   let memory_body =
+    let open Libwasm.Types in
+    let root_ident = Ident.create "data_root" in
+    let init_data lims =
+      (* Generate memcpy calls to initialise memory *)
+      let memcpy (symb, offset, size) =
+        let addr = Cop (Caddi,
+          [Cvar root_ident;
+           Cconst_natint (Int64.to_nativeint offset)], nodbg) in
+        Cop (Cextcall ("memcpy", typ_void, false, None),
+          [addr; Cconst_symbol symb; Cconst_int size], nodbg) in
+
+      let rec call_seq calls =
+        match calls with
+          | [] -> Ctuple []
+          | x :: xs -> Csequence (x, call_seq xs) in
+      call_seq (List.map (memcpy) data_info) in
+
     match ir_mod.memory_metadata with
-      | Some (MemoryType lims) ->
+      | NoMemory -> Ctuple []
+      | ImportedMemory (_, MemoryType lims) ->
+          let root =
+            Cop (Cload (Word_int, Mutable),
+              [Cconst_symbol (Compile_env.memory_symbol env)], nodbg) in
+          Clet (root_ident, root, init_data lims)
+      | LocalMemory (MemoryType lims) ->
         (* Initialise struct representing this module's memory *)
-        let root_ident = Ident.create "data_root" in
         let root =
           Cop (Cload (Word_int, Mutable),
             [Cconst_symbol (Compile_env.memory_symbol env)], nodbg) in
-
-        (* Generate memcpy calls to initialise memory *)
-        let init_data =
-          let memcpy (symb, offset, size) =
-            let addr = Cop (Caddi,
-              [Cvar root_ident;
-               Cconst_natint (Int64.to_nativeint offset)], nodbg) in
-            Cop (Cextcall ("memcpy", typ_void, false, None),
-              [addr; Cconst_symbol symb; Cconst_int size], nodbg) in
-
-          let rec call_seq calls =
-            match calls with
-              | [] -> Ctuple []
-              | x :: xs -> Csequence (x, call_seq xs) in
-          call_seq (List.map (memcpy) data_info) in
-
         (* Set up memory page limits *)
         let max_addressable_pages = 65535 in
         let min_pages = Cconst_natint (Nativeint.of_int32 lims.min) in
@@ -934,8 +940,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
               [memory_symbol; min_pages; max_pages],
               nodbg
             ),
-            Clet (root_ident, root, init_data))
-      | None -> Ctuple [] in
+            Clet (root_ident, root, init_data lims)) in
 
   (* Initialise the table with elements *)
   let table_body =
@@ -1050,25 +1055,41 @@ let module_function_table :
 let module_function_table env (ir_mod: Stackless.module_) =
   let ir_table = ir_mod.table in
   let global_symbol symb = [Cglobal_symbol symb; Cdefine_symbol symb] in
-
+  let limits =
   match ir_table with
-    | LocalTable limits ->
-        (* Table size: int size * 2 * (limits.min) *)
-        (* Right now, it's safe to assume that the table size is static
-         * throughout execution, since we don't provide a runtime embedder API
-         * to resize the table. Thus, we may ignore the `max` field. *)
-        let table_size = Arch.size_int * 2 * (Int32.to_int limits.min) in
-        global_symbol (Compile_env.table_count_symbol env) @
-        [Cint (Nativeint.of_int32 limits.min)] @
-        global_symbol (Compile_env.table_symbol env) @
-        [Cskip (table_size)]
-    | ImportedTable (module_name, limits) -> failwith "todo"
+    | LocalTable limits -> limits
+    | ImportedTable (_, limits) -> limits in
+  (* Table size: int size * 2 * (limits.min) *)
+  (* Right now, it's safe to assume that the table size is static
+   * throughout execution, since we don't provide a runtime embedder API
+   * to resize the table. Thus, we may ignore the `max` field. *)
+  let table_size = Arch.size_int * 2 * (Int32.to_int limits.min) in
+  global_symbol (Compile_env.table_count_symbol env) @
+  [Cint (Nativeint.of_int32 limits.min)] @
+  global_symbol (Compile_env.table_symbol env) @
+  [Cskip (table_size)]
+
+
 
 (* IR function to CMM phrase list *)
 let compile_module name (ir_mod: Stackless.module_) =
   let sanitised_name = (Util.Names.sanitise name) in
+  let table_module_name =
+    match ir_mod.table with
+      | LocalTable _ -> sanitised_name
+      | ImportedTable (name, _) -> name in
+  let memory_module_name =
+    match ir_mod.memory_metadata with
+      | NoMemory -> sanitised_name (* Doesn't matter. *)
+      | LocalMemory _ -> sanitised_name
+      | ImportedMemory (name, _) -> name in
   let env =
-    populate_symbols name (Compile_env.empty sanitised_name) ir_mod in
+    populate_symbols name
+      (Compile_env.empty
+        ~module_name:sanitised_name
+        ~memory_module_name
+        ~table_module_name
+      ) ir_mod in
   let memory_symbol_name = Compile_env.memory_symbol env in
   let (data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in

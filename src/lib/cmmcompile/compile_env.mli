@@ -1,6 +1,10 @@
 type t
 
-val empty : string (* memory symbol name *) -> t
+val empty :
+  module_name:string ->
+  memory_module_name:string ->
+  table_module_name:string ->
+  t
 
 val bind_var : Ir.Var.t -> Ident.t -> t -> t
 val lookup_var : Ir.Var.t -> t -> Ident.t

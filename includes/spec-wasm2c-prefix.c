@@ -175,27 +175,27 @@ static bool is_arithmetic_nan_f64(u64 x) {
 /*
  * spectest implementations
  */
-static void spectest_print(void) {
+void spectest_print(void) {
   printf("spectest.print()\n");
 }
 
-static void spectest_print_i32(uint32_t i) {
+void spectest_print_i32(uint32_t i) {
   printf("spectest.print_i32(%d)\n", i);
 }
 
-static void spectest_print_f32(float f) {
+void spectest_print_f32(float f) {
   printf("spectest.print_f32(%g)\n", f);
 }
 
-static void spectest_print_i32_f32(uint32_t i, float f) {
+void spectest_print_i32_f32(uint32_t i, float f) {
   printf("spectest.print_i32_f32(%d %g)\n", i, f);
 }
 
-static void spectest_print_f64(double d) {
+void spectest_print_f64(double d) {
   printf("spectest.print_f64(%g)\n", d);
 }
 
-static void spectest_print_f64_f64(double d1, double d2) {
+void spectest_print_f64_f64(double d1, double d2) {
   printf("spectest.print_f64_f64(%g %g)\n", d1, d2);
 }
 

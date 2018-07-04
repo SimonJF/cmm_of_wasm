@@ -60,11 +60,16 @@ type table =
   | LocalTable of (Int32.t Libwasm.Types.limits)
   | ImportedTable of (string * (Int32.t Libwasm.Types.limits))
 
+type memory =
+  | NoMemory
+  | LocalMemory of Libwasm.Types.memory_type
+  | ImportedMemory of (string * Libwasm.Types.memory_type)
+
 type module_ = {
     funcs : (func * Func.t) Util.Maps.Int32Map.t;
     globals: Global.t Util.Maps.Int32Map.t;
     start : Func.t option;
-    memory_metadata: Libwasm.Types.memory_type option;
+    memory_metadata: memory;
     exports : Libwasm.Ast.export list;
     data : data list;
     table: table;
