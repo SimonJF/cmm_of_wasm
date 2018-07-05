@@ -59,7 +59,7 @@ let memory_symbol env =
   env.memory_module_name ^ "_Memory"
 
 let global_symbol env glob =
-  match Global.data glob with
+  match Ir.Global.data glob with
     | DefinedGlobal _ ->
         env.module_name ^ "_Global" ^
           Ir.Global.(id glob |> Id.to_string)

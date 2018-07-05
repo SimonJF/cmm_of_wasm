@@ -429,6 +429,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
       |> snd in
 
 
+    (* TODO: Handle global symbols for tables and memories *)
     let exports = ast_mod.exports in
     let memory_metadata =
       match ast_mod.memories with

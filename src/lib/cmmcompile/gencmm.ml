@@ -595,7 +595,7 @@ let compile_expression env =
           Cmm_rts.Globals.get ~symbol ~ty:(Global.type_ g) in
 
         match Global.data g with
-          | DefinedGlobal { _; initial_value = Constant v} ->
+          | DefinedGlobal { initial_value = Constant v} ->
             (* If global is mutable, then we need to read from
              * its associated symbol. *)
             if Global.is_mutable g then load_global g
@@ -603,7 +603,7 @@ let compile_expression env =
               (* If it's immutable, we may simply return its (compiled) initial
                * value. *)
               compile_value v
-          | DefinedGlobal { _; initial_value = AnotherGlobal g } ->
+          | DefinedGlobal { initial_value = AnotherGlobal g } ->
               (* If we're referencing another global, then we know by
                * the specification that the other global *must* be an
                * imported global. *)
@@ -894,7 +894,7 @@ let rec populate_symbols module_name env (ir_module: Stackless.module_) : Compil
               Util.Names.internal_name (name_prefix ^ name)
             else
               name_prefix ^ name in
-          (* Internal name if we're generating CMM; standard name if not *)
+          (* Internal name if we're generating C; standard name if not *)
           Compile_env.bind_global_func_symbol md name acc
       | None -> Compile_env.bind_internal_func_symbol name_prefix md acc |> snd
   ) (ir_module.funcs) env
@@ -906,11 +906,28 @@ let compile_functions env (ir_mod: Stackless.module_) =
       Cfunction (compile_function func md env))
 
 let init_function module_name env (ir_mod: Stackless.module_) data_info =
+  let open Util.Maps in
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
   let rec call_seq =
     List.fold_left (fun acc x -> Csequence (x, acc)) (Ctuple []) in
 
-  (* TODO: Memcpy all of the globals here!!!!! *)
+  let global_body =
+    let memcpy (_, g) =
+      match Global.data g with
+        | DefinedGlobal { initial_value = Constant _ } ->
+            (* Defined at symbol export time, we don't need to do anything here. *)
+            Ctuple []
+        | DefinedGlobal { initial_value = AnotherGlobal g2 } ->
+            let symb = Compile_env.global_symbol env g in
+            Cop (Cextcall ("memcpy", typ_void, false, None),
+              [ Cconst_symbol symb;
+                Cconst_symbol (Compile_env.global_symbol env g2);
+                Cconst_int Arch.size_int], nodbg)
+        | ImportedGlobal _ ->
+            (* Loads will happen directly from the other symbol,
+             * nothing to copy here *)
+            Ctuple [] in
+    call_seq (List.map (memcpy) (Int32Map.bindings ir_mod.globals)) in
 
   let memory_body =
     let open Libwasm.Types in
@@ -958,7 +975,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
   (* Initialise the table with elements *)
   let table_body =
     let compile_elem (offset, elem_map) =
-      Util.Maps.Int32Map.fold (fun idx func acc ->
+      Int32Map.fold (fun idx func acc ->
         let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
         let symb = Compile_env.lookup_func_symbol func env |> Symbol.name in
         let cmm_idx =
@@ -982,6 +999,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
    * and `M ; () ~~> M` translations, so we don't have to worry about unit
    * values floating around. *)
   let init_instrs = [
+    global_body;
     memory_body;
     table_body;
     start_body
@@ -1018,11 +1036,20 @@ let module_data name (ir_mod: Stackless.module_) =
   (List.rev data_rev |> List.concat, List.rev info_rev)
 
 
-(* TODO: Handle exported globals *)
-(* NEXT UP: This needs modifying to new global representation *)
 let module_globals env (ir_mod: Stackless.module_) =
   let open Libwasm.Values in
   let open Util.Maps in
+  let open Util.Sets in
+  let exported_global_set =
+    (* TODO: Do we need to do something with export names here? *)
+    List.fold_left (fun acc (x: Libwasm.Ast.export) ->
+      let open Libwasm.Ast in
+      match x.it.edesc.it with
+        | GlobalExport v -> Int32Set.add v.it acc
+        | _ -> acc) Int32Set.empty (ir_mod.exports) in
+
+  let is_exported i = Int32Set.mem i exported_global_set in
+
   let global_bindings = Int32Map.bindings ir_mod.globals in
 
   let compile_data_value = function
@@ -1031,10 +1058,27 @@ let module_globals env (ir_mod: Stackless.module_) =
     | F32 x -> Cint32 (Libwasm.F32.to_bits x |> Nativeint.of_int32)
     | F64 x -> Cint (Libwasm.F64.to_bits x |> Int64.to_nativeint) in
 
-  List.map (fun (_, g) ->
-    let dat = compile_data_value (Global.initial_value g) in
-    let symb_name = Compile_env.global_symbol env g in
-    [Cdefine_symbol symb_name; dat]) global_bindings
+  (* We can initialise certain variables (i.e., those initialised with
+   * a constant expression) at compile-time to reduce the number of
+   * memcpy operations we need *)
+  List.map (fun (wasm_id, g) ->
+    let export dat =
+      let symb_name = Compile_env.global_symbol env g in
+      if is_exported wasm_id then
+        [Cglobal_symbol symb_name; Cdefine_symbol symb_name; dat]
+      else
+        [Cdefine_symbol symb_name; dat] in
+
+    match Global.data g with
+      | DefinedGlobal { initial_value = Constant lit } ->
+          export (compile_data_value lit)
+      | DefinedGlobal _ -> export (Cint Nativeint.zero)
+      | ImportedGlobal _ ->
+          (* Don't need to generate a symbol for an imported global,
+           * as this will be generated by the module exporting the
+           * global *)
+          []
+  ) global_bindings
   |> List.concat
 
 
