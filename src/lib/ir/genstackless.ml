@@ -373,7 +373,6 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
       List.fold_left (fun (i, acc) ty ->
         let acc = Int32Map.add i (ty.it) acc in
         (Int32.(add i one), acc)) (0l, Int32Map.empty) ast_mod.types |> snd in
-    let default_table = LocalTable { min = 0l; max = None} in
 
     (* Next, handle imports. *)
     (* Validation should ensure that a table / memory is not both defined
@@ -398,10 +397,21 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
               let funcs = Int32Map.add f_idx func_metadata fs in
               (funcs, Int32.(add f_idx one), gs, g_idx, t, m)
           | TableImport (TableType (lims, _)) ->
-              let table = ImportedTable (module_name, lims) in
+              let table =
+                Some (ImportedTable {
+                  module_name;
+                  table_name = import_name;
+                  limits = lims
+                }) in
               (fs, f_idx, gs, g_idx, table, m)
-          | MemoryImport mty ->
-              (fs, f_idx, gs, g_idx, t, ImportedMemory (module_name, mty))
+          | MemoryImport (MemoryType lims)->
+              let memory =
+                Some (ImportedMemory {
+                  module_name;
+                  memory_name = import_name;
+                  limits = lims
+                }) in
+              (fs, f_idx, gs, g_idx, t, memory)
           | GlobalImport gty ->
               let g =
                 Global.create_imported
@@ -412,7 +422,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
               (fs, f_idx, gs, Int32.(add g_idx one), t, m)
       ) (Int32Map.empty, Int32.zero,
          Int32Map.empty, Int32.zero,
-         default_table, NoMemory) ast_mod.imports in
+         None, None) ast_mod.imports in
 
     (* Next, prepare all of the defined globals *)
     let globals =
@@ -434,7 +444,8 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     let memory_metadata =
       match ast_mod.memories with
         | [] -> memory_metadata
-        | x :: _ -> LocalMemory x.it.mtype in
+        | x :: _ ->
+            Some (LocalMemory x.it.mtype) in
 
     let table =
       let open Libwasm.Types in
@@ -442,7 +453,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         | [] -> table
         | t :: _ ->
             let TableType (limits, _) = t.it.ttype in
-            LocalTable limits in
+            Some (LocalTable limits) in
 
     (* Update the function metadata map with defined functions,
      * starting after the indexing space of the imported functions *)
@@ -452,28 +463,6 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         let md = Func.create_defined ty in
         (Int32.(add i one), Int32Map.add i md acc))
       (func_import_count, func_metadata_map) ast_mod.funcs |> snd in
-
-    (* Next, traverse exports and name function metadata *)
-    let func_metadata_map =
-      let open Libwasm.Ast in
-      List.fold_left (fun acc export ->
-        let export = export.it in
-        match export.edesc.it with
-          | FuncExport v ->
-              let v = v.it in
-              let md = Int32Map.find v acc in
-              begin
-                match Func.name md with
-                  | Some _fn_name ->
-                      (* Already added *)
-                      acc
-                  | None ->
-                      (* Re-add function with export name *)
-                      let md = Func.with_name md export.name in
-                      Int32Map.add v md acc
-              end
-          | _ -> (* Other exports don't matter on this pass *) acc
-      ) func_metadata_map ast_mod.exports in
 
     (* Given a (possibly-empty) integer constant expression, return
      * either the constant value, a global reference,

@@ -7,14 +7,12 @@ val create_imported :
   Libwasm.Types.func_type -> t
 
 val print : Format.formatter -> t -> unit
-
-val with_name : t -> Libwasm.Ast.name -> t
-
-val name : t -> string option
 val type_ : t -> Libwasm.Types.func_type
 
 val to_sexpr : t -> Libwasm.Sexpr.sexpr
 val is_imported : t -> bool
+val to_string : t -> string
+val symbol : string -> t -> string
 
 module M : Map.OrderedType with type t = t
 module Map : sig

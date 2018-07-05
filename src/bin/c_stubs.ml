@@ -10,6 +10,13 @@ type cfunc = {
   ret_ty : c_type
 }
 
+type export =
+  | Cfunc of cfunc
+  | Cglobal of { name: string; type_ = c_type }
+  | Cmemory of { name: string }
+  | Ctable of { name: string }
+
+
 let ctype_of_wasm_type =
   let open Libwasm.Types in
   function
@@ -33,7 +40,7 @@ let signature func =
   Printf.sprintf "%s %s(%s)"
     (string_of_ctype func.ret_ty) func.external_name args
 
-let cfunc_of_func' module_name func =
+let cfunc_of_func module_name func =
   let arg_name i = function
     | U32 | U64 -> "i" ^ (string_of_int i)
     | F32 | F64 -> "f" ^ (string_of_int i)
@@ -64,15 +71,32 @@ let cfunc_of_func' module_name func =
            args = c_args; ret_ty = ret }]
 
 
-let cfunc_of_func ~module_name func =
-  match cfunc_of_func' module_name func with
-    | [] -> None
-    | [x] -> Some x
-    | _ -> assert false
+(* STILL TO DO: Need to implement each of the export_* functions. Then
+ * need to write header serialisers for globals, tables, and memories. *)
+let c_exports ~module_name (ir_mod: Ir.Stackless.module_) : export list  =
+  let open Util.Maps in
+  List.map (fun x ->
+    let x = x.it in
+    let export_name =
+      Util.Names.name_to_string name |> sanitise in
 
-let cfuncs_of_funcs ~module_name funcs =
-  List.concat (List.map (cfunc_of_func' module_name) funcs)
+    match x.edesc.it with
+      | FuncExport v ->
+          let (_func, md) = Int32Map.find v.it ir_mod.funcs in
+          export_func ~module_name ~function_name:export_name md
+      | TableExport _ ->
+          export_table ~module_name ~table_name:export_name ir_mod.table
+      | MemoryExport _ ->
+          export_memory ~module_name ~memory_name:export_name ir_mod.memory
+      | GlobalExport v ->
+          let g = Int32Map.find v.it ir_mod.globals in
+          export_global ~module_name ~global_name:export_name g
+  ) exports
 
+(*
+let cfuncs_of_funcs ~module_name ir_mod funcs =
+  List.concat (List.map (cfunc_of_func module_name) funcs)
+*)
 let int_registers =
   (* OCaml calling conventions, you be crazy.. *)
     ["rax"; "rbx"; "rdi"; "rsi"; "rdx"; "rcx"; "r8"; "r9";
