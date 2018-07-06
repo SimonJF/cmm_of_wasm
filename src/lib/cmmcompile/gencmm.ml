@@ -1147,7 +1147,7 @@ let compile_module name (ir_mod: Stackless.module_) =
       ~module_name:sanitised_name
       ~memory:ir_mod.memory_metadata
       ~table:ir_mod.table in
-  let (data, data_info) = module_data name ir_mod in
+  let (elem_data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in
 
   let export_info = split_exports ir_mod in
@@ -1158,6 +1158,7 @@ let compile_module name (ir_mod: Stackless.module_) =
   let data =
     Cdata
       ([func_exports;
+        elem_data;
         memory;
         global_data;
         table

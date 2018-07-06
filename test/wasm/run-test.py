@@ -148,8 +148,6 @@ class CWriter(object):
         name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
         if self.mangle:
           name = MangleName(name)
-        else:
-          name = name + "_"
 
         self.module_prefix_map[idx] = name
 
@@ -214,7 +212,7 @@ class CWriter(object):
 
   def _WriteModuleCommand(self, command):
     self.module_idx += 1
-    self.out_file.write('%sinit();\n' % self.GetModulePrefix())
+    self.out_file.write('%s_init();\n' % self.GetModulePrefix())
 
   def _WriteActionCommand(self, command):
     self.out_file.write('%s;\n' % self._Action(command))
@@ -301,7 +299,7 @@ class CWriter(object):
       field = (module_name + MangleName(action['field']) +
                MangleName(self._ActionSig(action, expected)))
     else:
-      field = module_name + "cfunc_" +  re.sub(r'[^a-zA-Z0-9_]', '_', action['field'])
+      field = module_name + "_cfunc_" +  re.sub(r'[^a-zA-Z0-9_]', '_', action['field'])
     if type_ == 'invoke':
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
     elif type_ == 'get':
