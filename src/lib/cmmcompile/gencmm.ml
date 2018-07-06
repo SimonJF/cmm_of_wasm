@@ -1104,11 +1104,9 @@ let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
 
     match x.edesc.it with
       | FuncExport v ->
-          let func_symbols = Int32Map.find v.it acc.func_symbols in
           { acc with func_symbols = add_or_update v.it name acc.func_symbols }
       | GlobalExport v ->
-          let func_symbols = Int32Map.find v.it acc.func_symbols in
-          { acc with func_symbols = add_or_update v.it name acc.func_symbols }
+          { acc with global_symbols = add_or_update v.it name acc.global_symbols }
       | TableExport _ ->
           { acc with table_symbols = name :: acc.table_symbols }
       | MemoryExport _ ->

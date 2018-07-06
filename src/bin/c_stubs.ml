@@ -255,8 +255,7 @@ let header ~module_name ~exports =
     |> String.concat "\n" in
 
   let header_name =
-    let sanitised = Util.Names.sanitise module_name in
-    Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii sanitised) in
+    Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii module_name) in
   let rts_basename = Filename.basename (Util.Command_line.rts_header ()) in
 
   "#ifndef " ^ header_name ^ "\n" ^

@@ -41,21 +41,15 @@ let global_symbol glob env =
 
 let table_symbol env =
   match env.table with
-    | Some (LocalTable tty) ->
-        env.module_name ^ "_internaltable"
     | Some (ImportedTable { module_name; table_name }) ->
         Printf.sprintf "%s_table_%s" module_name table_name
-    | _ -> failwith "Tried to get symbol for nonexistent table"
+    | _ -> env.module_name ^ "_internaltable"
 
 let memory_symbol env =
   match env.memory with
-    | Some (LocalMemory _mty) -> env.module_name ^ "_internalmemory"
     | Some (ImportedMemory { module_name; memory_name }) ->
         Printf.sprintf "%s_memory_%s" module_name memory_name
-    | None ->
-        (* Should not arise in validated modules *)
-        failwith "Tried to get symbol for nonexistent memory."
-
+    | _ -> env.module_name ^ "_internalmemory"
 
 let dump env =
   let open Ir in

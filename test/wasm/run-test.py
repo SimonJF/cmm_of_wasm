@@ -301,7 +301,7 @@ class CWriter(object):
       field = (module_name + MangleName(action['field']) +
                MangleName(self._ActionSig(action, expected)))
     else:
-      field = module_name + re.sub(r'[^a-zA-Z0-9_]', '_', action['field'])
+      field = module_name + "cfunc_" +  re.sub(r'[^a-zA-Z0-9_]', '_', action['field'])
     if type_ == 'invoke':
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
     elif type_ == 'get':

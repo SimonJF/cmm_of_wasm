@@ -68,7 +68,8 @@ let generate_c_stubs ~header_filename (ir_mod:Ir.Stackless.module_) =
   let open Util.Maps in
   let module_name =
     Command_line.output_filename ()
-      |> Filename.basename in
+      |> Filename.basename
+      |> Util.Names.sanitise in
   let exports = C_stubs.c_exports ~module_name ir_mod in
   let header = C_stubs.header ~module_name ~exports in
   let stub = C_stubs.stub_file ~header_filename ~module_name ~exports in
