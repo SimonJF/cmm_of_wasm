@@ -58,7 +58,7 @@ let func_id = function
   | DefinedFunction { core_info } -> core_info.id
   | ImportedFunction { core_info } -> core_info.id
 
-let symbol module_name = function
+let symbol ~module_name = function
   | DefinedFunction { core_info } ->
       module_name ^ "_funcinternal_" ^ (string_of_int core_info.id)
   | ImportedFunction { import_info } ->

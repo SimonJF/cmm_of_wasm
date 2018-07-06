@@ -64,15 +64,14 @@ let write_file (filename: string) (contents: string) =
   Printf.fprintf oc "%s\n" contents;
   close_out oc
 
-let generate_c_stubs ~header_filename (ir:Ir.Stackless.module_) =
+let generate_c_stubs ~header_filename (ir_mod:Ir.Stackless.module_) =
   let open Util.Maps in
-  let funcs = Int32Map.bindings ir.funcs |> List.map (fun (_, (_, x)) -> x) in
   let module_name =
     Command_line.output_filename ()
       |> Filename.basename in
-  let c_funcs = C_stubs.cfuncs_of_funcs ~module_name funcs in
-  let header = C_stubs.header ~module_name ~c_funcs in
-  let stub = C_stubs.stub_file ~header_filename ~c_funcs in
+  let exports = C_stubs.c_exports ~module_name ir_mod in
+  let header = C_stubs.header ~module_name ~exports in
+  let stub = C_stubs.stub_file ~header_filename ~module_name ~exports in
   (header, stub)
 
 let write_tmp_c_stubs ~header ~header_filename ~stub ~stub_filename =

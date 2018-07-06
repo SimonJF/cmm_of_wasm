@@ -83,3 +83,13 @@ let to_sexpr x =
       (Types.string_of_global_type x.type_) in
   Atom (str)
 
+let symbol ~module_name glob =
+  match glob.data with
+    | DefinedGlobal _ ->
+        Printf.sprintf
+          "%s_internalglobal_%s"
+          module_name
+          (Id.to_string glob.id)
+    | ImportedGlobal { module_name; global_name } ->
+        module_name ^ "_global_" ^ global_name
+

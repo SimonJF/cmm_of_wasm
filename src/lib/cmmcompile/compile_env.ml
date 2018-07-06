@@ -33,26 +33,11 @@ let bind_label lbl env =
 
 let lookup_label lbl env = Ir.Label.Id.Map.find (Ir.Label.id lbl) env.label_env
 
-let func_symbol func env = Ir.Func.symbol env.module_name func
-
-let memory_symbol env =
-  match env.memory with
-    | Some (LocalMemory _mty) -> env.module_name ^ "_internalmemory"
-    | Some (ImportedMemory { module_name; memory_name }) ->
-        Printf.sprintf "%s_memory_%s" module_name memory_name
-    | None ->
-        (* Should not arise in validated modules *)
-        failwith "Tried to get symbol for nonexistent memory"
+let func_symbol func env =
+  Ir.Func.symbol ~module_name:env.module_name func
 
 let global_symbol glob env =
-  match Ir.Global.data glob with
-    | DefinedGlobal _ ->
-        Printf.sprintf
-          "%s_internalglobal_%s"
-          env.module_name
-          Ir.Global.(id glob |> Id.to_string)
-    | ImportedGlobal { module_name; global_name } ->
-        module_name ^ "_global_" ^ global_name
+  Ir.Global.symbol ~module_name:env.module_name glob
 
 let table_symbol env =
   match env.table with
@@ -61,6 +46,16 @@ let table_symbol env =
     | Some (ImportedTable { module_name; table_name }) ->
         Printf.sprintf "%s_table_%s" module_name table_name
     | _ -> failwith "Tried to get symbol for nonexistent table"
+
+let memory_symbol env =
+  match env.memory with
+    | Some (LocalMemory _mty) -> env.module_name ^ "_internalmemory"
+    | Some (ImportedMemory { module_name; memory_name }) ->
+        Printf.sprintf "%s_memory_%s" module_name memory_name
+    | None ->
+        (* Should not arise in validated modules *)
+        failwith "Tried to get symbol for nonexistent memory."
+
 
 let dump env =
   let open Ir in

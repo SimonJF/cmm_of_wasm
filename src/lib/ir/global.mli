@@ -35,3 +35,4 @@ type global_data =
 val data : t -> global_data
 val to_sexpr : t -> Libwasm.Sexpr.sexpr
 
+val symbol : module_name:string -> t -> string
