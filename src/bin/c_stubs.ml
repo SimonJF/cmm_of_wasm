@@ -63,7 +63,7 @@ let export_func ~function_name func =
     Cfunc { name = function_name; args = c_args;
       ret_ty = ret; ir_func = func }
 
-let c_exports ~module_name (ir_mod: Ir.Stackless.module_) : c_export list  =
+let c_exports ~prefix (ir_mod: Ir.Stackless.module_) : c_export list  =
   let open Util.Maps in
   List.map (fun (x: Libwasm.Ast.export) ->
     let x = x.it in
@@ -73,18 +73,18 @@ let c_exports ~module_name (ir_mod: Ir.Stackless.module_) : c_export list  =
     match x.edesc.it with
       | FuncExport v ->
           let (_func, md) = Int32Map.find v.it ir_mod.funcs in
-          let name = Printf.sprintf "%s_cfunc_%s" module_name export_name in
+          let name = Printf.sprintf "%s_cfunc_%s" prefix export_name in
           export_func ~function_name:name md
       | TableExport _ ->
-          let name = Printf.sprintf "%s_table_%s" module_name export_name in
+          let name = Printf.sprintf "%s_table_%s" prefix export_name in
           Ctable { name }
       | MemoryExport _ ->
-          let name = Printf.sprintf "%s_memory_%s" module_name export_name in
+          let name = Printf.sprintf "%s_memory_%s" prefix export_name in
           Cmemory { name }
       | GlobalExport v ->
           let g = Int32Map.find v.it ir_mod.globals in
           let cty = ctype_of_wasm_type (Global.type_ g) in
-          let name = Printf.sprintf "%s_global_%s" module_name export_name in
+          let name = Printf.sprintf "%s_global_%s" prefix export_name in
           Cglobal { name; type_ = cty }
   ) ir_mod.exports
 
@@ -103,7 +103,7 @@ let float_register i =
   else
     "xmm" ^ (string_of_int i)
 
-let generate_cstub module_name export =
+let generate_cstub prefix export =
   let generate_func_stub func =
     (* Helpers *)
     let try_get_register = function
@@ -220,7 +220,7 @@ let generate_cstub module_name export =
     let push_registers =
       "  asm (\"push %%rbp\\n\\t\" \"push %%rsi\" : );\n" in
 
-    let internal_name = Func.symbol module_name func.ir_func in
+    let internal_name = Func.symbol prefix func.ir_func in
 
     signature func ^ " {\n" ^
       defined_registers ^
@@ -237,7 +237,7 @@ let generate_cstub module_name export =
     | Cfunc func -> [generate_func_stub func]
     | _ -> []
 
-let header ~module_name ~exports =
+let header ~prefix ~exports =
   let header_prefix =
     let header_prefix_path = Util.Command_line.header_prefix_path () in
     Util.Files.read_text_file header_prefix_path in
@@ -255,7 +255,7 @@ let header ~module_name ~exports =
     |> String.concat "\n" in
 
   let header_name =
-    Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii module_name) in
+    Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii prefix) in
   let rts_basename = Filename.basename (Util.Command_line.rts_header ()) in
 
   "#ifndef " ^ header_name ^ "\n" ^
@@ -266,9 +266,9 @@ let header ~module_name ~exports =
   header_exports ^ "\n" ^
   "#endif"
 
-let stub_file ~header_filename ~module_name ~exports =
+let stub_file ~header_filename ~prefix ~exports =
   let func_stubs =
-    List.map (generate_cstub module_name) exports
+    List.map (generate_cstub prefix) exports
       |> List.concat
       |> String.concat "\n\n" in
   Printf.sprintf "#include \"%s\"\n\n%s\n" header_filename func_stubs
