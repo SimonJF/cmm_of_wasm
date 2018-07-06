@@ -62,7 +62,7 @@ let symbol ~module_name = function
   | DefinedFunction { core_info } ->
       module_name ^ "_funcinternal_" ^ (string_of_int core_info.id)
   | ImportedFunction { import_info } ->
-      import_info.module_name ^ "_func_" ^ import_info.function_name
+      import_info.module_name ^ "_cfunc_" ^ import_info.function_name
 
 module M = struct
   type nonrec t = t

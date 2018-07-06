@@ -250,7 +250,7 @@ let header ~prefix ~exports =
             Printf.sprintf "wasm_rt_table_t* %s;" name
         | Cmemory { name } -> Printf.sprintf "wasm_rt_memory_t* %s;" name
         | Cglobal { name; type_ } ->
-            Printf.sprintf "%s* %s;" name (string_of_ctype type_)
+            Printf.sprintf "%s* %s;" (string_of_ctype type_) name
     ) exports
     |> String.concat "\n" in
 

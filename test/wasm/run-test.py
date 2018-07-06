@@ -416,10 +416,11 @@ def main(args):
 
     for i, wasm_filename in enumerate(cwriter.GetModuleFilenames()):
       chopped_filename = os.path.splitext(os.path.basename(wasm_filename))[0]
+      prefix = cwriter.GetModulePrefix(i)
       if options.keep_temp:
-          cmm_of_wasm.RunWithArgs('-o', chopped_filename, wasm_filename, '-tv', cwd=out_dir)
+          cmm_of_wasm.RunWithArgs('-o', chopped_filename, '-p', prefix, wasm_filename, '-tv', cwd=out_dir)
       else:
-          cmm_of_wasm.RunWithArgs('-o', chopped_filename, wasm_filename, cwd=out_dir)
+          cmm_of_wasm.RunWithArgs('-o', chopped_filename, '-p', prefix, wasm_filename, cwd=out_dir)
 
       o_filenames.append(chopped_filename + '.o')
 
