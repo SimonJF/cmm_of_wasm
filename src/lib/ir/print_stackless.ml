@@ -11,9 +11,9 @@ let sexpr_of_effect e =
   let head, inner =
     match e with
       | Stackless.SetGlobal (glob, v) ->
-          "set_global", 
+          "set_global",
           [Global.to_sexpr glob; var_atom v]
-      | Stackless.Store store_op -> 
+      | Stackless.Store store_op ->
           let open Libwasm in
           let op = store_op.op in
           let idx = Var.to_string store_op.index in
@@ -63,7 +63,7 @@ and sexpr_of_terminator term =
           [ Func.to_sexpr func;
             Atom ("args " ^ concat_args args);
             Branch.to_sexpr cont ]
-      | CallIndirect { type_; func; args; cont } -> 
+      | CallIndirect { type_; func; args; cont } ->
           "call_indirect",
           [Atom ("ty " ^ Libwasm.Types.string_of_func_type type_);
            Atom ("id " ^ Var.to_string func);
@@ -122,7 +122,7 @@ let sexpr_of_module (m: Stackless.module_) =
   let globals = Int32Map.bindings m.globals in
   let sexpr_of_func_def (_, (f, md)) =
     Node ("func",
-      [ Func.to_sexpr md; sexpr_of_func f (Func.name md) ]) in
+      [ Func.to_sexpr md; sexpr_of_func f (Func.to_string md) ]) in
 
   let funcs = Node ("funcs", List.map sexpr_of_func_def funcs) in
   let globals =

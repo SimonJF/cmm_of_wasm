@@ -194,12 +194,14 @@ end
 
 module Tables = struct
   let count env =
-    let symb = Cconst_symbol (Compile_env.table_count_symbol env) in
+    let symb = Cconst_symbol (Compile_env.table_symbol env) in
     Cop (Cload (Word_int, Immutable), [symb], nodbg)
 
   (* Precondition: function ID is normalised (i.e., top 32 bits cleared *)
   let function_offset func_id =
-    Cop (Cmuli, [func_id; Cconst_int (2 * Arch.size_int)], nodbg)
+    Cop (Caddi,
+      [Cop (Cmuli, [func_id; Cconst_int (2 * Arch.size_int)], nodbg);
+       Cconst_int (2 * Arch.size_int)], nodbg)
 
   let function_hash env func_id =
     let root_symb = Cconst_symbol (Compile_env.table_symbol env) in

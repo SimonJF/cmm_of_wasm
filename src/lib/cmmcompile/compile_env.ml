@@ -2,23 +2,21 @@ type t = {
   var_env : Ident.t Ir.Var.Map.t;
   label_env : int Ir.Label.Id.Map.t;
   label_count : int;
-  func_symbols : Symbol.symbol Ir.Func.Map.t;
-  func_count : int;
   module_name : string;
-  memory_module_name : string; (* Name of module containing memory *)
-  table_module_name : string; (* Name of module containing table *)
+  memory: Ir.Stackless.memory option;
+  table : Ir.Stackless.table option
 }
 
-let empty ~module_name ~memory_module_name ~table_module_name = {
+let empty ~module_name ~memory ~table = {
   var_env = Ir.Var.Map.empty;
   label_env = Ir.Label.Id.Map.empty;
   label_count = 0;
-  func_count = 0;
-  func_symbols = Ir.Func.Map.empty;
   module_name;
-  memory_module_name;
-  table_module_name
+  memory;
+  table
 }
+
+let module_name env = env.module_name
 
 let bind_var v i env = {
   env with var_env = Ir.Var.Map.add v i env.var_env
@@ -35,38 +33,23 @@ let bind_label lbl env =
 
 let lookup_label lbl env = Ir.Label.Id.Map.find (Ir.Label.id lbl) env.label_env
 
-let bind_internal_func_symbol prefix func env =
-  let open Symbol in
-  let name = (prefix ^ (string_of_int env.func_count)) in
-  let symbol = Internal_symbol name in
-  let new_env =
-    { env with func_count = env.func_count + 1;
-      func_symbols = Ir.Func.Map.add func symbol env.func_symbols } in
-  (symbol, new_env)
+let func_symbol func env =
+  Ir.Func.symbol ~module_name:env.module_name func
 
-let lookup_func_symbol func env = Ir.Func.Map.find func env.func_symbols
-
-let bind_global_func_symbol (md: Ir.Func.t) (name: string) env =
-  { env with
-      func_symbols =
-        Ir.Func.Map.add md (Symbol.Exported_symbol name) env.func_symbols
-  }
-
-let symbols env =
-  List.map snd (Ir.Func.Map.bindings env.func_symbols)
-
-let memory_symbol env =
-  env.memory_module_name ^ "_Memory"
-
-let global_symbol env glob =
-  env.module_name ^ "_Global" ^
-    Ir.Global.(id glob |> Id.to_string)
-
-let table_count_symbol env =
-  env.table_module_name ^ "_TableCount"
+let global_symbol glob env =
+  Ir.Global.symbol ~module_name:env.module_name glob
 
 let table_symbol env =
-  env.table_module_name ^ "_Table"
+  match env.table with
+    | Some (ImportedTable { module_name; table_name }) ->
+        Printf.sprintf "%s_table_%s" module_name table_name
+    | _ -> env.module_name ^ "_internaltable"
+
+let memory_symbol env =
+  match env.memory with
+    | Some (ImportedMemory { module_name; memory_name }) ->
+        Printf.sprintf "%s_memory_%s" module_name memory_name
+    | _ -> env.module_name ^ "_internalmemory"
 
 let dump env =
   let open Ir in
@@ -88,23 +71,9 @@ let dump env =
         (Format.flush_str_formatter ()) v) bindings;
       print_newline () in
 
-  let print_func_symbols () =
-    let bindings = Func.Map.bindings (env.func_symbols) in
-    List.iter (fun (k, v) ->
-      let open Libwasm in
-      Ir.Func.print Format.str_formatter k;
-      Printf.printf "%s : %s\n"
-        (Format.flush_str_formatter ()) (Symbol.name v)) bindings;
-      print_newline () in
-
   print_endline "Var env:";
   print_var_env ();
   print_endline "Label env:";
   print_label_env ();
-  Printf.printf "Label count: %d\n" env.label_count;
-  print_endline "Func symbols:";
-  print_func_symbols ();
-  Printf.printf "Func count: %d\n" env.func_count
-
-
+  Printf.printf "Label count: %d\n" env.label_count
 

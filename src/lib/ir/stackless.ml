@@ -52,30 +52,34 @@ type func = {
 }
 
 type data = {
-  offset: int64;
+  offset: expr;
   contents: string
 }
 
 type table =
   | LocalTable of (Int32.t Libwasm.Types.limits)
-  | ImportedTable of (string * (Int32.t Libwasm.Types.limits))
+  | ImportedTable of {
+      module_name: string;
+      table_name: string;
+      limits: Int32.t Libwasm.Types.limits
+    }
 
 type memory =
-  | NoMemory
   | LocalMemory of Libwasm.Types.memory_type
-  | ImportedMemory of (string * Libwasm.Types.memory_type)
+  | ImportedMemory of {
+      module_name: string;
+      memory_name: string;
+      limits: Int32.t Libwasm.Types.limits
+  }
 
 type module_ = {
     funcs : (func * Func.t) Util.Maps.Int32Map.t;
     globals: Global.t Util.Maps.Int32Map.t;
     start : Func.t option;
-    memory_metadata: memory;
     exports : Libwasm.Ast.export list;
+    memory_metadata: memory option;
     data : data list;
-    table: table;
-    table_elems : Func.t Util.Maps.Int32Map.t
+    table: table option;
+    table_elems : (expr * Func.t Util.Maps.Int32Map.t) list (* Expr: offset *)
 }
 
-let lookup_function (ir_mod: module_) (v: Libwasm.Ast.var) =
-  let key = v.it in
-  Util.Maps.Int32Map.find key ir_mod.funcs

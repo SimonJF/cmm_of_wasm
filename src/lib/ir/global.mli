@@ -6,10 +6,21 @@ module Id : sig
 end
 
 type t
-val create :
+
+type initial_value =
+  | Constant of Libwasm.Values.value
+  | AnotherGlobal of t
+
+val create_defined :
   name: Libwasm.Ast.name option ->
-  Libwasm.Types.global_type ->
-  Libwasm.Values.value ->
+  ty: Libwasm.Types.global_type ->
+  initial_value: initial_value ->
+  t
+
+val create_imported :
+  module_name: string ->
+  global_name: string ->
+  ty: Libwasm.Types.global_type ->
   t
 
 val id : t -> Id.t
@@ -17,9 +28,11 @@ val is_mutable : t -> bool
 val print : Format.formatter -> t -> unit
 val type_ : t -> Libwasm.Types.value_type
 
-val name : t -> string option
+type global_data =
+  | DefinedGlobal of { name: string option; initial_value : initial_value }
+  | ImportedGlobal of { module_name: string; global_name: string }
 
-val initial_value : t -> Libwasm.Values.value
-
+val data : t -> global_data
 val to_sexpr : t -> Libwasm.Sexpr.sexpr
 
+val symbol : module_name:string -> t -> string

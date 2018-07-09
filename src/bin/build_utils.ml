@@ -47,32 +47,16 @@ let cleanup_temp_files files =
   if not (Command_line.keep_temp ()) then
     List.iter (Sys.remove) files
 
-let build_without_c ~output_name ~out_dir cmm =
-  let assembly_filename = Filename.temp_file output_name ".s" in
-  let verbose = Command_line.verbose () in
-  let obj_file = Filename.concat out_dir (output_name ^ ".o") in
-    if verbose then begin
-      Printf.eprintf "@ asm: %s\n%!" assembly_filename;
-    end;
-  gen_asm assembly_filename obj_file cmm;
-  call_compiler ["-c"] assembly_filename obj_file;
-  if not (Command_line.keep_temp ()) then
-    cleanup_temp_files [assembly_filename]
-
 let write_file (filename: string) (contents: string) =
   let oc = open_out filename in
   Printf.fprintf oc "%s\n" contents;
   close_out oc
 
-let generate_c_stubs ~header_filename (ir:Ir.Stackless.module_) =
+let generate_c_stubs ~header_filename ~prefix (ir_mod:Ir.Stackless.module_) =
   let open Util.Maps in
-  let funcs = Int32Map.bindings ir.funcs |> List.map (fun (_, (_, x)) -> x) in
-  let module_name =
-    Command_line.output_filename ()
-      |> Filename.basename in
-  let c_funcs = C_stubs.cfuncs_of_funcs ~module_name funcs in
-  let header = C_stubs.header ~module_name ~c_funcs in
-  let stub = C_stubs.stub_file ~header_filename ~c_funcs in
+  let exports = C_stubs.c_exports ~prefix ir_mod in
+  let header = C_stubs.header ~prefix ~exports in
+  let stub = C_stubs.stub_file ~header_filename ~prefix ~exports in
   (header, stub)
 
 let write_tmp_c_stubs ~header ~header_filename ~stub ~stub_filename =
@@ -80,7 +64,7 @@ let write_tmp_c_stubs ~header ~header_filename ~stub ~stub_filename =
   write_file stub_filename stub
 
 (* Default: build with C stubs *)
-let build ~output_name ~out_dir ~ir ~cmm =
+let build ~output_name ~prefix ~out_dir ~ir ~cmm =
   (* Filename of generated assembly *)
   let assembly_filename = Filename.temp_file output_name ".s" in
   (* Filename of compiled CMM object *)
@@ -116,6 +100,7 @@ let build ~output_name ~out_dir ~ir ~cmm =
   let (header, stub) =
     generate_c_stubs
       ~header_filename:stub_h_filename
+      ~prefix
       ir in
   write_tmp_c_stubs
     ~header ~header_filename:stub_h_filename
@@ -156,43 +141,42 @@ let parse_module (var, script) =
   in
   var, modul_
 
-let parse_sexpr name file =
-  let ic = open_in file in
+let parse_sexpr filename =
+  let ic = open_in filename in
   try
     let lexbuf = Lexing.from_channel ic in
-    let e = Parse.parse name lexbuf (Parse.Module) in
+    let e = Parse.parse filename lexbuf (Parse.Module) in
     close_in ic;
     parse_module e
   with e ->
     close_in ic;
     raise e
 
-let parse_binary name file =
-  let input_binary_file name file =
+let parse_binary filename =
+  let input_binary_file =
     let open Ast in
     let open Source in
-    trace ("Loading (" ^ file ^ ")...");
-    let ic = open_in_bin file in
+    trace ("Loading (" ^ filename ^ ")...");
+    let ic = open_in_bin filename in
     try
       let len = in_channel_length ic in
       let buf = Bytes.make len '\x00' in
       really_input ic buf 0 len;
       trace "Decoding...";
       let res =
-        (None, Script.Encoded (name, (Bytes.to_string buf)) @@ no_region) in
+        (None, Script.Encoded (filename, (Bytes.to_string buf)) @@ no_region) in
       close_in ic;
       res
     with exn -> close_in ic; raise exn in
-  input_binary_file name file
-  |> parse_module
+  parse_module input_binary_file
 
-let parse_file name file =
+let parse_file filename =
   let unsupported _ =
-    failwith (file ^ ": unsupported file type (try .wat or .wasm)") in
+    failwith (filename ^ ": unsupported file type (try .wat or .wasm)") in
   Libwasm.Run.dispatch_file_ext
-    (parse_binary name)
-    (parse_sexpr name)
+    (parse_binary)
+    (parse_sexpr)
     unsupported
     unsupported
     unsupported
-    file
+    filename

@@ -2,7 +2,15 @@
 open Ir
 open Cmm
 open Cmm_trap
-open Symbol
+open Util.Maps
+
+(* Record type to hold information about exports *)
+type export_info = {
+  func_symbols: string list Int32Map.t;
+  global_symbols: string list Int32Map.t;
+  memory_symbols: string list;
+  table_symbols: string list
+}
 
 (* Environment access helper functions *)
 let lv env x = Compile_env.lookup_var x env
@@ -588,16 +596,30 @@ let compile_expression env =
   | Select { cond ; ifso ; ifnot } ->
       Cifthenelse (Cvar (lv env cond), Cvar(lv env ifso), Cvar(lv env ifnot))
   | GetGlobal g ->
-      (* If global is mutable, then we need to read from
-       * its associated symbol. *)
-      if Global.is_mutable g then
-        let symbol =
-          Cconst_symbol (Compile_env.global_symbol env g) in
-        Cmm_rts.Globals.get ~symbol ~ty:(Global.type_ g)
-      else
-        (* If it's immutable, we may simply return its (compiled) initial
-         * value. *)
-        compile_value (Global.initial_value g)
+      begin
+        let load_global g =
+          let symbol =
+            Cconst_symbol (Compile_env.global_symbol g env) in
+          Cmm_rts.Globals.get ~symbol ~ty:(Global.type_ g) in
+
+        match Global.data g with
+          | DefinedGlobal { initial_value = Constant v} ->
+            (* If global is mutable, then we need to read from
+             * its associated symbol. *)
+            if Global.is_mutable g then load_global g
+            else
+              (* If it's immutable, we may simply return its (compiled) initial
+               * value. *)
+              compile_value v
+          | DefinedGlobal { initial_value = AnotherGlobal g } ->
+              (* If we're referencing another global, then we know by
+               * the specification that the other global *must* be an
+               * imported global. *)
+              load_global g
+          | ImportedGlobal _ ->
+              (* If we're referencing an imported global, we load that. *)
+              load_global g
+      end
   | Load (loadop, v) ->
       Cmm_rts.Memory.load
         ~root:(Cconst_symbol (Compile_env.memory_symbol env))
@@ -728,30 +750,18 @@ let compile_terminator env =
         Cifthenelse (test, true_branch, false_branch)
     | Call { func ; args; cont } ->
         let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
-        (* FIXME: Incorporate imported functions here *)
-        (* Lookup function symbol from table *)
-        if Func.is_imported func then
-          begin
-            let name =
-              match Func.name func with
-                | Some x -> x
-                | None ->
-                    (* name will always be set on an imported function *)
-                    assert false in
-            call
-              (import_call_noreturn name)
-              (import_call_return1 name)
-              ret_tys args cont
-          end
-        else
-          begin
-            let symbol_name = Compile_env.lookup_func_symbol func env |> Symbol.name in
-            let fn_symbol = Cconst_symbol symbol_name in
-            call
-              (local_call_noreturn fn_symbol)
-              (local_call_return1 fn_symbol)
-              ret_tys args cont
-          end
+        let symb = Compile_env.func_symbol func env in
+        let (noreturn, return1) =
+          (* We need slightly different functions based on whether or
+           * not the symbol is imported or not (imported calls must
+           * use an extcall) *)
+          if Func.is_imported func then
+            (import_call_noreturn symb),
+            (import_call_return1 symb)
+          else
+            (local_call_noreturn (Cconst_symbol symb)),
+            (local_call_return1 (Cconst_symbol symb)) in
+        call (noreturn) (return1) ret_tys args cont
     | CallIndirect { type_; func; args; cont } ->
         (* Normalise function index *)
         let func_ident = Ident.create "func_id" in
@@ -812,7 +822,7 @@ let rec compile_body env terminator = function
             let e1 = compile_expression env e in
             Clet (ident, e1, compile_body env terminator xs)
         | Effect (SetGlobal (g, v)) ->
-            let symbol = Cconst_symbol (Compile_env.global_symbol env g) in
+            let symbol = Cconst_symbol (Compile_env.global_symbol g env) in
             Csequence (
               Cmm_rts.Globals.set
                 ~symbol
@@ -836,9 +846,7 @@ and compile_term env term = compile_body env (term.terminator) (term.body)
 (* IR function to CMM function *)
 let compile_function (ir_func: Stackless.func) func_md env =
   (* Name *)
-  let name =
-    Compile_env.lookup_func_symbol func_md env
-    |> Symbol.name in
+  let name = Compile_env.func_symbol func_md env in
   (* Arguments: Need to bind each param in the env we will
    * use to compile the function, and pair with machtype *)
   let FuncType (arg_tys, ret_tys) = Func.type_ func_md in
@@ -868,31 +876,34 @@ let compile_function (ir_func: Stackless.func) func_md env =
     fun_dbg = nodbg
   }
 
-(* Now we've named the functions in the IR pass, we can simplify this. *)
-let rec populate_symbols module_name env (ir_module: Stackless.module_) : Compile_env.t =
-  let open Libwasm.Ast in
-  let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
-  Util.Maps.Int32Map.fold (fun _ (_, md) acc ->
-    match Func.name md with
-      | Some name ->
-          let name =
-            if Util.Command_line.generate_c () then
-              Util.Names.internal_name (name_prefix ^ name)
-            else
-              name_prefix ^ name in
-          (* Internal name if we're generating CMM; standard name if not *)
-          Compile_env.bind_global_func_symbol md name acc
-      | None -> Compile_env.bind_internal_func_symbol name_prefix md acc |> snd
-  ) (ir_module.funcs) env
-
 let compile_functions env (ir_mod: Stackless.module_) =
-  let open Util.Maps in
   Int32Map.bindings ir_mod.funcs
   |> List.map (fun (_, (func, md)) ->
       Cfunction (compile_function func md env))
 
 let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
+  let rec call_seq =
+    List.fold_left (fun acc x -> Csequence (x, acc)) (Ctuple []) in
+
+  let global_body =
+    let memcpy (_, g) =
+      match Global.data g with
+        | DefinedGlobal { initial_value = Constant _ } ->
+            (* Defined at symbol export time, we don't need to do anything here. *)
+            Ctuple []
+        | DefinedGlobal { initial_value = AnotherGlobal g2 } ->
+            let symb = Compile_env.global_symbol g env in
+            Cop (Cextcall ("memcpy", typ_void, false, None),
+              [ Cconst_symbol symb;
+                Cconst_symbol (Compile_env.global_symbol g2 env);
+                Cconst_int Arch.size_int], nodbg)
+        | ImportedGlobal _ ->
+            (* Loads will happen directly from the other symbol,
+             * nothing to copy here *)
+            Ctuple [] in
+    call_seq (List.map (memcpy) (Int32Map.bindings ir_mod.globals)) in
+
   let memory_body =
     let open Libwasm.Types in
     let root_ident = Ident.create "data_root" in
@@ -900,29 +911,25 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
       (* Generate memcpy calls to initialise memory *)
       let memcpy (symb, offset, size) =
         let addr = Cop (Caddi,
-          [Cvar root_ident;
-           Cconst_natint (Int64.to_nativeint offset)], nodbg) in
+          [Cvar root_ident; compile_expression env offset], nodbg) in
         Cop (Cextcall ("memcpy", typ_void, false, None),
           [addr; Cconst_symbol symb; Cconst_int size], nodbg) in
+        call_seq (List.map (memcpy) data_info) in
 
-      let rec call_seq calls =
-        match calls with
-          | [] -> Ctuple []
-          | x :: xs -> Csequence (x, call_seq xs) in
-      call_seq (List.map (memcpy) data_info) in
+    let memory_symbol = Cconst_symbol (Compile_env.memory_symbol env) in
 
     match ir_mod.memory_metadata with
-      | NoMemory -> Ctuple []
-      | ImportedMemory (_, MemoryType lims) ->
+      | None -> Ctuple []
+      | Some (ImportedMemory { limits }) ->
           let root =
             Cop (Cload (Word_int, Mutable),
-              [Cconst_symbol (Compile_env.memory_symbol env)], nodbg) in
-          Clet (root_ident, root, init_data lims)
-      | LocalMemory (MemoryType lims) ->
+              [memory_symbol], nodbg) in
+          Clet (root_ident, root, init_data limits)
+      | Some (LocalMemory (MemoryType lims)) ->
         (* Initialise struct representing this module's memory *)
         let root =
           Cop (Cload (Word_int, Mutable),
-            [Cconst_symbol (Compile_env.memory_symbol env)], nodbg) in
+            [memory_symbol], nodbg) in
         (* Set up memory page limits *)
         let max_addressable_pages = 65535 in
         let min_pages = Cconst_natint (Nativeint.of_int32 lims.min) in
@@ -932,7 +939,6 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
               | Some x -> Cconst_natint (Nativeint.of_int32 x)
               | None -> Cconst_natint (Nativeint.of_int max_addressable_pages)
           end in
-        let memory_symbol = Cconst_symbol (Compile_env.memory_symbol env) in
         (* Perform allocation, then initialise data *)
           Csequence (
             Cop (
@@ -944,19 +950,21 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
 
   (* Initialise the table with elements *)
   let table_body =
-    Util.Maps.Int32Map.fold (fun idx func acc ->
-      let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
-      let symb = Compile_env.lookup_func_symbol func env |> Symbol.name in
-      let cmm_idx = Cconst_natint (Nativeint.of_int32 idx) in
-      Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx hash symb, acc)
-    ) ir_mod.table_elems (Ctuple []) in
+    let compile_elem (offset, elem_map) =
+      Int32Map.fold (fun idx func acc ->
+        let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
+        let symb = Compile_env.func_symbol func env in
+        let cmm_idx =
+          Cop (Caddi, [compile_expression env offset;
+            Cconst_natint (Nativeint.of_int32 idx)], nodbg) in
+        Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx hash symb, acc)
+      ) elem_map (Ctuple []) in
+    List.map (compile_elem) ir_mod.table_elems |> call_seq in
 
   let start_body =
     match ir_mod.start with
       | Some md ->
-          let symbol_name =
-            Compile_env.lookup_func_symbol md env
-            |> Symbol.name in
+          let symbol_name = Compile_env.func_symbol md env in
           let fn_symbol = Cconst_symbol symbol_name in
           Cop (Capply typ_void, [fn_symbol], nodbg)
       | _ -> Ctuple [] in
@@ -965,19 +973,16 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
    * and `M ; () ~~> M` translations, so we don't have to worry about unit
    * values floating around. *)
   let init_instrs = [
+    global_body;
     memory_body;
     table_body;
     start_body
   ] in
 
-  let body =
-    List.fold_left
-      (fun x acc -> Csequence (x, acc))
-      (Ctuple [])
-      init_instrs in
+  let body = call_seq init_instrs in
 
   Cfunction {
-    fun_name = name_prefix ^ "init";
+    fun_name = name_prefix ^ "initinternal";
     fun_args = [];
     fun_body = body;
     fun_codegen_options = [No_CSE];
@@ -988,7 +993,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
  * The (symbol, offset, size) list is a list of data symbols along with
  * their respective sizes. *)
 let module_data name (ir_mod: Stackless.module_) =
-  let name_prefix = (Util.Names.sanitise name) ^ "_Data_" in
+  let name_prefix = (Util.Names.sanitise name) ^ "_data_" in
 
   let emit_string_constant symb s =
     let n = Arch.size_int - 1 - (String.length s) mod Arch.size_int in
@@ -1005,10 +1010,8 @@ let module_data name (ir_mod: Stackless.module_) =
   (List.rev data_rev |> List.concat, List.rev info_rev)
 
 
-(* TODO: Handle exported globals *)
-let module_globals env (ir_mod: Stackless.module_) =
+let module_globals env (ir_mod: Stackless.module_) export_info =
   let open Libwasm.Values in
-  let open Util.Maps in
   let global_bindings = Int32Map.bindings ir_mod.globals in
 
   let compile_data_value = function
@@ -1017,88 +1020,156 @@ let module_globals env (ir_mod: Stackless.module_) =
     | F32 x -> Cint32 (Libwasm.F32.to_bits x |> Nativeint.of_int32)
     | F64 x -> Cint (Libwasm.F64.to_bits x |> Int64.to_nativeint) in
 
-  List.map (fun (_, g) ->
-    let dat = compile_data_value (Global.initial_value g) in
-    let symb_name = Compile_env.global_symbol env g in
-    [Cdefine_symbol symb_name; dat]) global_bindings
+  (* We can initialise certain variables (i.e., those initialised with
+   * a constant expression) at compile-time to reduce the number of
+   * memcpy operations we need *)
+  List.map (fun (wasm_id, g) ->
+
+    let exported_symbols =
+      (match Int32Map.find_opt wasm_id export_info.global_symbols with
+        | Some symbs -> List.map (fun x -> [Cglobal_symbol x; Cdefine_symbol x]) symbs
+        | None -> []) |> List.concat in
+
+    let make_symbol dat =
+      exported_symbols @
+        [Cdefine_symbol (Compile_env.global_symbol g env); dat] in
+
+    match Global.data g with
+      | DefinedGlobal { initial_value = Constant lit } ->
+          make_symbol (compile_data_value lit)
+      | DefinedGlobal _ ->
+          (* We need a symbol, but don't have the global initialisation
+           * information available at compile-time, so we set to 0 *)
+          make_symbol (Cint Nativeint.zero)
+      | ImportedGlobal _ ->
+          (* Don't need to generate a symbol for an imported global,
+           * as this will be generated by the module exporting the
+           * global *)
+          []
+  ) global_bindings
   |> List.concat
 
-
-(* Initial thought was that we could initialise table just like this.
- * We might be able to, to an extent, as an optimisation. For now,
- * we're initialising everything at runtime in the `init` function,
- * which will help with inter-module linking, which may overwrite
- * table entries. *)
-(* Instead, though, we can allocate the space. *)
-(*
-let module_function_table :
-  Compile_env.t ->
-  Stackless.module_ ->
-  Cmm.data_item list = fun env ir_mod ->
-    let funcs = ir_mod.function_table in
-    let table_entries =
-      List.map (fun func ->
-        let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
-        let symb = Compile_env.lookup_func_symbol func env |> Symbol.name in
-        Cint hash :: Csymbol_address symb
-      ) funcs
-      |> List.concat in
-    (* Export both table count and table since they will be needed for linking *)
-    (* It's useful to have a table size as a native int even if it's probably a
-     * lot shorter than that for reasons of alignment. *)
-    global_symbol (Compile_env.table_count_symbol) @
-      [Cint (Nativeint.of_int List.length funcs)] @
-      global_symb (Compile_env.table_symbol) @
-      table_entries in
-*)
-
-let module_function_table env (ir_mod: Stackless.module_) =
+let module_function_table env (ir_mod: Stackless.module_) export_info =
   let ir_table = ir_mod.table in
-  let global_symbol symb = [Cglobal_symbol symb; Cdefine_symbol symb] in
-  let limits =
+  let table_exports =
+    List.map (fun x -> [Cglobal_symbol x; Cdefine_symbol x])
+      export_info.table_symbols |> List.concat in
+
   match ir_table with
-    | LocalTable limits -> limits
-    | ImportedTable (_, limits) -> limits in
-  (* Table size: int size * 2 * (limits.min) *)
-  (* Right now, it's safe to assume that the table size is static
-   * throughout execution, since we don't provide a runtime embedder API
-   * to resize the table. Thus, we may ignore the `max` field. *)
-  let table_size = Arch.size_int * 2 * (Int32.to_int limits.min) in
-  global_symbol (Compile_env.table_count_symbol env) @
-  [Cint (Nativeint.of_int32 limits.min)] @
-  global_symbol (Compile_env.table_symbol env) @
-  [Cskip (table_size)]
+    | Some (LocalTable limits) ->
+        let table_size =
+          (Arch.size_int * 2 * (Int32.to_int limits.min)) in
+        let max =
+          match limits.max with
+            | Some m -> m | None -> Int32.zero in
+        table_exports @
+        [Cdefine_symbol (Compile_env.table_symbol env);
+         Cint (Nativeint.of_int32 limits.min);
+         Cint (Nativeint.of_int32 max);
+         Cskip (table_size)]
+    | Some (ImportedTable { limits }) ->
+        (* If we're importing a table instead of defining one,
+         * then we don't need to do define any table symbols
+         * since we'll use symbols from the other modules *)
+        []
+    | None -> []
+
+let module_memory env (ir_mod: Stackless.module_) export_info =
+  let memory_exports =
+    List.map (fun x -> [Cglobal_symbol x; Cdefine_symbol x])
+      export_info.memory_symbols |> List.concat in
+
+  (* Memory symbol: needs 3 words of space to store struct created by RTS *)
+  (* Must only define a memory symbol for an internal memory symbol! *)
+  match ir_mod.memory_metadata with
+    | Some (LocalMemory _) ->
+      let struct_size = Arch.size_int * 3 in
+      let memory_symb =
+        [Cdefine_symbol (Compile_env.memory_symbol env); Cskip struct_size] in
+      memory_exports @ memory_symb
+    | Some (ImportedMemory { module_name; memory_name }) ->
+        memory_exports @ [Csymbol_address (Compile_env.memory_symbol env)]
+    | None -> []
+
+let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
+  let open Libwasm.Ast in
+  let empty =
+    { func_symbols = Int32Map.empty;
+      global_symbols = Int32Map.empty;
+      memory_symbols = []; table_symbols = [] } in
+
+  List.fold_left (fun acc (x: Libwasm.Ast.export) ->
+    let x = x.it in
+    let name = Util.Names.sanitise (Util.Names.name_to_string x.name) in
+    let add_or_update k v m =
+      Int32Map.update k (fun xs_opt ->
+        match xs_opt with
+          | Some xs -> Some (v :: xs)
+          | None -> Some [v]
+      ) m in
+
+    match x.edesc.it with
+      | FuncExport v ->
+          { acc with func_symbols = add_or_update v.it name acc.func_symbols }
+      | GlobalExport v ->
+          { acc with global_symbols = add_or_update v.it name acc.global_symbols }
+      | TableExport _ ->
+          { acc with table_symbols = name :: acc.table_symbols }
+      | MemoryExport _ ->
+          { acc with memory_symbols = name :: acc.memory_symbols }) empty ir_mod.exports
 
 
+(* Exported function symbols have to be handled slightly differently, since CMM
+ * distinguishes between functions and data items. Nonetheless, each function symbol
+ * can straightforwardly refer to a function pointer, which can be used directly
+ * by Capply calls. *)
+let module_function_exports env (ir_mod: Stackless.module_) =
+  let open Libwasm.Ast in
+  let global_symbol name dat =
+    [Cglobal_symbol name; Cdefine_symbol name; dat] in
+  let export_symbol name =
+    Printf.sprintf "%s_func_%s" (Compile_env.module_name env) name in
+  let sanitise name = Util.Names.(name_to_string name |> sanitise) in
 
-(* IR function to CMM phrase list *)
+  List.map (fun (x: Libwasm.Ast.export) ->
+    let x = x.it in
+    let name = sanitise x.name in
+    match x.edesc.it with
+      | FuncExport v ->
+          let func = Int32Map.find v.it (ir_mod.funcs) |> snd in
+          let symbol = export_symbol name in
+          let internal_symbol = Compile_env.func_symbol func env in
+          global_symbol symbol (Csymbol_address internal_symbol)
+      | _ -> []
+  ) ir_mod.exports
+  |> List.rev
+  |> List.concat
+
+  (* IR function to CMM phrase list *)
 let compile_module name (ir_mod: Stackless.module_) =
   let sanitised_name = (Util.Names.sanitise name) in
-  let table_module_name =
-    match ir_mod.table with
-      | LocalTable _ -> sanitised_name
-      | ImportedTable (name, _) -> name in
-  let memory_module_name =
-    match ir_mod.memory_metadata with
-      | NoMemory -> sanitised_name (* Doesn't matter. *)
-      | LocalMemory _ -> sanitised_name
-      | ImportedMemory (name, _) -> name in
   let env =
-    populate_symbols name
-      (Compile_env.empty
-        ~module_name:sanitised_name
-        ~memory_module_name
-        ~table_module_name
-      ) ir_mod in
-  let memory_symbol_name = Compile_env.memory_symbol env in
-  let (data, data_info) = module_data name ir_mod in
+    Compile_env.empty
+      ~module_name:sanitised_name
+      ~memory:ir_mod.memory_metadata
+      ~table:ir_mod.table in
+  let (elem_data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in
-  let global_data = module_globals env ir_mod in
-  let table = module_function_table env ir_mod in
-  (* Memory symbol: needs 3 words of space to store struct created by RTS *)
-  let struct_size = Arch.size_int * 3 in
+
+  let export_info = split_exports ir_mod in
+  let func_exports = module_function_exports env ir_mod in
+  let memory = module_memory env ir_mod export_info in
+  let global_data = module_globals env ir_mod export_info in
+  let table = module_function_table env ir_mod export_info in
   let data =
-    Cdata ([Cdefine_symbol memory_symbol_name; Cskip struct_size] @ data @ global_data @ table) in
+    Cdata
+      ([func_exports;
+        elem_data;
+        memory;
+        global_data;
+        table
+      ] |> List.concat) in
+
   let funcs = compile_functions env ir_mod @ [init] in
   funcs @ [data]
 

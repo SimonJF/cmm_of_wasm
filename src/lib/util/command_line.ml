@@ -13,6 +13,7 @@ module Refs = struct
   let rts_path = ref None
   let initial_fuel = ref 500
   let keep_temp = ref false
+  let prefix = ref None
 end
 
 let options =
@@ -28,7 +29,8 @@ let options =
     (noshort, "rts", None, Some (fun s -> Refs.rts_path := (Some s)));
     (noshort, "header-prefix", None, Some (fun s -> Refs.header_prefix_path := (Some s)));
     (noshort, "fuel", None, Some (fun i -> Refs.initial_fuel := (int_of_string i)));
-    ('t', "keep-temp", Some (fun () -> Refs.keep_temp := true), None)
+    ('t', "keep-temp", Some (fun () -> Refs.keep_temp := true), None);
+    ('p', "prefix", None, Some (fun s -> Refs.prefix := (Some s)))
   ]
 
 let set_filename fn = Refs.filename := fn
@@ -90,3 +92,5 @@ let rts_header () = Filename.concat (rts_path ()) "wasm-rt.h"
 let initial_fuel () = !Refs.initial_fuel
 
 let keep_temp () = !Refs.keep_temp
+
+let prefix () = !Refs.prefix

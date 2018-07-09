@@ -25,9 +25,7 @@ let dump_stackless ir =
       print (Ir.Print_stackless.string_of_module ir)
     end
 
-let compile_module output_file (_name_opt, module_) =
-  (* FIXME: currently this will break if output_file contains invalid characters *)
-  (* FIXME: need to namespace internal function symbols *)
+let compile_module ~output_file ~prefix module_ =
   print_module module_;
   (* Validate the module *)
   Libwasm.Valid.check_module module_;
@@ -35,21 +33,32 @@ let compile_module output_file (_name_opt, module_) =
   let ir = Ir.Genstackless.ir_module module_ in
   dump_stackless ir;
   (* Compile to CMM *)
-  let cmm_phrases = Cmmcompile.Gencmm.compile_module output_file ir in
+  let cmm_phrases = Cmmcompile.Gencmm.compile_module prefix ir in
   dump_cmm cmm_phrases;
   (* Compile to ASM *)
   let output_dir = Filename.dirname output_file in
   let output_base = Filename.basename output_file in
   Build_utils.build
     ~output_name:output_base
+    ~prefix
     ~out_dir:output_dir
     ~ir
     ~cmm:cmm_phrases
 
 let frontend filename =
-  let name = Filename.basename filename in
-  Build_utils.parse_file name filename
-  |> compile_module (Command_line.output_filename ())
+  let (_, parsed_module) = Build_utils.parse_file filename in
+  let output_file = Command_line.output_filename () in
+  let prefix =
+    begin
+      match Command_line.prefix () with
+        | Some prefix -> prefix
+        | None -> output_file
+      end
+    |> Util.Names.sanitise in
+  compile_module
+    ~output_file
+    ~prefix
+    parsed_module
 
 let () =
   Command_line.setup ();
