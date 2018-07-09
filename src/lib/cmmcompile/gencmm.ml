@@ -1080,10 +1080,16 @@ let module_memory env (ir_mod: Stackless.module_) export_info =
       export_info.memory_symbols |> List.concat in
 
   (* Memory symbol: needs 3 words of space to store struct created by RTS *)
-  let struct_size = Arch.size_int * 3 in
-  let memory_symb =
-    [Cdefine_symbol (Compile_env.memory_symbol env); Cskip struct_size] in
-  memory_exports @ memory_symb
+  (* Must only define a memory symbol for an internal memory symbol! *)
+  match ir_mod.memory_metadata with
+    | Some (LocalMemory _) ->
+      let struct_size = Arch.size_int * 3 in
+      let memory_symb =
+        [Cdefine_symbol (Compile_env.memory_symbol env); Cskip struct_size] in
+      memory_exports @ memory_symb
+    | Some (ImportedMemory { module_name; memory_name }) ->
+        memory_exports @ [Csymbol_address (Compile_env.memory_symbol env)]
+    | None -> []
 
 let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
   let open Libwasm.Ast in
