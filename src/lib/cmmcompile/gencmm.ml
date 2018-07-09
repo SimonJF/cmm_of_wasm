@@ -982,7 +982,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let body = call_seq init_instrs in
 
   Cfunction {
-    fun_name = name_prefix ^ "init";
+    fun_name = name_prefix ^ "initinternal";
     fun_args = [];
     fun_body = body;
     fun_codegen_options = [No_CSE];

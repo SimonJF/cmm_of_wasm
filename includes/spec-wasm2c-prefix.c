@@ -199,9 +199,14 @@ void spectest_cfunc_print_f64_f64(double d1, double d2) {
   printf("spectest.print_f64_f64(%g %g)\n", d1, d2);
 }
 
-wasm_rt_table_t spectest_table_table;
-wasm_rt_memory_t spectest_memory_memory;
-uint32_t spectest_global_global_i32 = 666;
+static wasm_rt_table_t spectest_table;
+static wasm_rt_memory_t spectest_memory;
+static uint32_t spectest_global_i32 = 666;
+
+wasm_rt_table_t* spectest_table_table = &spectest_table;
+wasm_rt_memory_t* spectest_memory_memory = &spectest_memory;
+uint32_t* spectest_global_global_i32 = &spectest_global_i32;
+
 
 /*
 void (*Z_spectestZ_printZ_vv)(void) = &spectest_print;
@@ -218,8 +223,8 @@ uint32_t* Z_spectestZ_global_i32Z_i = &spectest_global_i32;
 */
 
 static void init_spectest_module(void) {
-  wasm_rt_allocate_memory(&spectest_memory_memory, 1, 2);
-  wasm_rt_allocate_table(&spectest_table_table, 10, 20);
+  wasm_rt_allocate_memory(&spectest_memory, 1, 2);
+  wasm_rt_allocate_table(&spectest_table, 10, 20);
 }
 
 

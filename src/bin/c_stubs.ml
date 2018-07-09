@@ -103,6 +103,10 @@ let float_register i =
   else
     "xmm" ^ (string_of_int i)
 
+let float_registers =
+  Array.init max_float_registers
+    (fun x -> "xmm" ^ (string_of_int x)) |> Array.to_list
+
 let generate_cstub prefix export =
   let generate_func_stub func =
     (* Helpers *)
@@ -267,9 +271,30 @@ let header ~prefix ~exports =
   "#endif"
 
 let stub_file ~header_filename ~prefix ~exports =
+  let init_func_stub =
+    let signature = Printf.sprintf "void %s_init()" prefix in
+    let all_registers = int_registers @ float_registers in
+    let clobbered_registers =
+      List.filter (fun x -> x <> "rsi" && x <> "rbp") all_registers
+      |> List.map (Printf.sprintf "\"%s\"") in
+    let clobbered_registers = ["\"memory\""; "\"cc\""] @ clobbered_registers in
+    let clobbered_registers_str = String.concat ", " clobbered_registers in
+
+    let push_registers =
+      "  asm (\"push %%rbp\\n\\t\" \"push %%rsi\" : );" in
+
+    let asm_call =
+      (Printf.sprintf "  asm volatile(\"call %s_initinternal\\n\\t\" \"pop %s\\n\\t\" \"pop %s\" : : : %s );"
+      prefix "%%rsi" "%%rbp" clobbered_registers_str) in
+
+    signature ^ " {" ^ "\n" ^
+    push_registers ^ "\n" ^
+    asm_call ^ "\n" ^
+    "}" in
+
   let func_stubs =
-    List.map (generate_cstub prefix) exports
-      |> List.concat
-      |> String.concat "\n\n" in
+    let stubs =
+      init_func_stub :: (List.map (generate_cstub prefix) exports |> List.concat) in
+    String.concat "\n\n" stubs in
   Printf.sprintf "#include \"%s\"\n\n%s\n" header_filename func_stubs
 
