@@ -13,7 +13,9 @@ STDERR_NAME = "test_stderr.txt"
 
 
 disabled = [
-  "names.wast"
+  "names.wast",
+  "start.wast",
+  "skip-stack-guard-page.wast"
 ]
 
 
