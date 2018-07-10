@@ -25,6 +25,7 @@ val create_imported :
 
 val id : t -> Id.t
 val is_mutable : t -> bool
+val is_imported : t -> bool
 val print : Format.formatter -> t -> unit
 val type_ : t -> Libwasm.Types.value_type
 

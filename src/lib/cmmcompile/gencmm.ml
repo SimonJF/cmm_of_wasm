@@ -1028,7 +1028,11 @@ let module_globals env (ir_mod: Stackless.module_) export_info =
 
     let exported_symbols =
       (match Int32Map.find_opt wasm_id export_info.global_symbols with
-        | Some symbs -> List.map (fun x -> [Cglobal_symbol x; Cdefine_symbol x]) symbs
+        | Some symbs ->
+            List.map (fun x ->
+              let name =
+                Printf.sprintf "%s_global_%s" (Compile_env.module_name env) x in
+              [Cglobal_symbol name; Cdefine_symbol name]) symbs
         | None -> []) |> List.concat in
 
     let make_symbol dat =
@@ -1080,7 +1084,9 @@ let module_function_table env (ir_mod: Stackless.module_) export_info =
 
 let module_memory env (ir_mod: Stackless.module_) export_info =
   let memory_exports =
-    List.map (fun x -> [Cglobal_symbol x; Cdefine_symbol x])
+    List.map (fun x ->
+      let name = Printf.sprintf "%s_memory_%s" (Compile_env.module_name env) x in
+      [Cglobal_symbol name; Cdefine_symbol name])
       export_info.memory_symbols |> List.concat in
 
   (* Memory symbol: needs 3 words of space to store struct created by RTS *)

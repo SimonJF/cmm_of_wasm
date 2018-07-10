@@ -50,6 +50,11 @@ let is_mutable { type_ = GlobalType (_, mut); _ } =
     | Mutable -> true
     | Immutable -> false
 
+let is_imported g =
+  match g.data with
+    | ImportedGlobal _ -> true
+    | DefinedGlobal _ -> false
+
 let type_ { type_ = GlobalType (typ, _); _ } = typ
 
 let name x =

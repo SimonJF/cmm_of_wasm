@@ -55,7 +55,7 @@ let write_file (filename: string) (contents: string) =
 let generate_c_stubs ~header_filename ~prefix (ir_mod:Ir.Stackless.module_) =
   let open Util.Maps in
   let exports = C_stubs.c_exports ~prefix ir_mod in
-  let header = C_stubs.header ~prefix ~exports in
+  let header = C_stubs.header ~prefix ~exports ~ir_mod in
   let stub = C_stubs.stub_file ~header_filename ~prefix ~exports in
   (header, stub)
 
