@@ -118,13 +118,19 @@ let const c = list sexpr_of_expr c
 
 let sexpr_of_module (m: Stackless.module_) =
   let open Util.Maps in
-  let funcs = Int32Map.bindings m.funcs in
+  let funcs = Int32Map.bindings m.function_metadata in
   let globals = Int32Map.bindings m.globals in
-  let sexpr_of_func_def (_, (f, md)) =
-    Node ("func",
-      [ Func.to_sexpr md; sexpr_of_func f (Func.to_string md) ]) in
 
-  let funcs = Node ("funcs", List.map sexpr_of_func_def funcs) in
+  let sexpr_of_func (i, md) =
+    let body =
+      match Int32Map.find_opt i m.function_ir with
+        | Some ir ->
+            [ Func.to_sexpr md; sexpr_of_func ir (Func.to_string md) ]
+        | None -> [Func.to_sexpr md] in
+    Node ("func", body) in
+
+  let funcs = Node ("funcs", List.map sexpr_of_func funcs) in
+
   let globals =
     Node ("globals", List.map (fun (_, x) -> Global.to_sexpr x) globals) in
   Node ("module", [funcs; globals])

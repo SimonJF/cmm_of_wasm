@@ -72,7 +72,7 @@ let c_exports ~prefix (ir_mod: Ir.Stackless.module_) : c_export list  =
 
     match x.edesc.it with
       | FuncExport v ->
-          let (_func, md) = Int32Map.find v.it ir_mod.funcs in
+          let md = Int32Map.find v.it ir_mod.function_metadata in
           let name = Printf.sprintf "%s_cfunc_%s" prefix export_name in
           export_func ~function_name:name md
       | TableExport _ ->

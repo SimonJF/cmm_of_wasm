@@ -438,8 +438,6 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         (Int32.(add i one), acc)) (global_import_count, globals) ast_mod.globals
       |> snd in
 
-
-    (* TODO: Handle global symbols for tables and memories *)
     let exports = ast_mod.exports in
     let memory_metadata =
       match ast_mod.memories with
@@ -500,11 +498,11 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         { offset; contents = data_seg.init }) ast_mod.data in
 
     (* Now that that's all sorted, we can compile each function *)
-    let funcs =
+    let function_ir =
       List.fold_left (fun (i, acc) func ->
         let md = Int32Map.find i func_metadata_map in
         let compiled_func = ir_func func_metadata_map globals func md types_map in
-        let acc = Int32Map.add i (compiled_func, md) acc in
+        let acc = Int32Map.add i compiled_func acc in
         (Int32.(add i one), acc)
       ) (func_import_count, Int32Map.empty) ast_mod.funcs
       |> snd in
@@ -515,7 +513,8 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
           Int32Map.find (v.it) func_metadata_map)) ast_mod.start in
 
     (* And for now, that should be it? *)
-    { funcs;
+    { function_metadata = func_metadata_map;
+      function_ir;
       globals;
       start;
       memory_metadata;

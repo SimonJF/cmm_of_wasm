@@ -73,7 +73,10 @@ type memory =
   }
 
 type module_ = {
-    funcs : (func * Func.t) Util.Maps.Int32Map.t;
+    function_metadata : Func.t Util.Maps.Int32Map.t;
+    (* Note that function_ir only contains entries for defined
+     * (not imported) functions *)
+    function_ir: func Util.Maps.Int32Map.t;
     globals: Global.t Util.Maps.Int32Map.t;
     start : Func.t option;
     exports : Libwasm.Ast.export list;

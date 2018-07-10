@@ -877,9 +877,10 @@ let compile_function (ir_func: Stackless.func) func_md env =
   }
 
 let compile_functions env (ir_mod: Stackless.module_) =
-  Int32Map.bindings ir_mod.funcs
-  |> List.map (fun (_, (func, md)) ->
-      Cfunction (compile_function func md env))
+  Int32Map.bindings ir_mod.function_ir
+  |> List.map (fun (id, func_ir) ->
+      let md = Int32Map.find id (ir_mod.function_metadata) in
+      Cfunction (compile_function func_ir md env))
 
 let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
@@ -1139,7 +1140,7 @@ let module_function_exports env (ir_mod: Stackless.module_) =
     let name = sanitise x.name in
     match x.edesc.it with
       | FuncExport v ->
-          let func = Int32Map.find v.it (ir_mod.funcs) |> snd in
+          let func = Int32Map.find v.it (ir_mod.function_metadata) in
           let symbol = export_symbol name in
           let internal_symbol = Compile_env.func_symbol func env in
           global_symbol symbol (Csymbol_address internal_symbol)
