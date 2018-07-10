@@ -883,8 +883,8 @@ let compile_functions env (ir_mod: Stackless.module_) =
 
 let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let name_prefix = (Util.Names.sanitise module_name) ^ "_" in
-  let rec call_seq =
-    List.fold_left (fun acc x -> Csequence (x, acc)) (Ctuple []) in
+  let call_seq =
+    List.fold_left (fun acc x -> Csequence (acc, x)) (Ctuple []) in
 
   let global_body =
     let memcpy (_, g) =
@@ -1052,7 +1052,10 @@ let module_globals env (ir_mod: Stackless.module_) export_info =
 let module_function_table env (ir_mod: Stackless.module_) export_info =
   let ir_table = ir_mod.table in
   let table_exports =
-    List.map (fun x -> [Cglobal_symbol x; Cdefine_symbol x])
+    List.map (fun x ->
+      let name = Printf.sprintf "%s_table_%s"
+        (Compile_env.module_name env) x in
+      [Cglobal_symbol name; Cdefine_symbol name])
       export_info.table_symbols |> List.concat in
 
   match ir_table with

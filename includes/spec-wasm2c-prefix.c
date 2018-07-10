@@ -203,6 +203,8 @@ wasm_rt_table_t spectest_table_table;
 wasm_rt_memory_t spectest_memory_memory;
 uint32_t spectest_global_global_i32 = 666;
 
+
+
 /*
 void (*Z_spectestZ_printZ_vv)(void) = &spectest_print;
 void (*Z_spectestZ_print_i32Z_vi)(uint32_t) = &spectest_print_i32;
