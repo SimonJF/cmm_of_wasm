@@ -11,9 +11,15 @@ type c_func = {
   ir_func : Func.t (* Ir function metadata *)
 }
 
+type c_global = {
+  name: string;
+  internal_name: string;
+  type_: c_type
+}
+
 type c_export =
   | Cfunc of c_func
-  | Cglobal of { name: string; type_: c_type }
+  | Cglobal of c_global
   | Cmemory of { name: string }
   | Ctable of { name: string }
 
@@ -100,8 +106,9 @@ let c_exports ~prefix (ir_mod: Ir.Stackless.module_) : c_export list  =
       | GlobalExport v ->
           let g = Int32Map.find v.it ir_mod.globals in
           let cty = ctype_of_wasm_type (Global.type_ g) in
-          let name = Printf.sprintf "%s_global_%s" prefix export_name in
-          Cglobal { name; type_ = cty }
+          let name = Printf.sprintf "%s_cglobal_%s" prefix export_name in
+          let internal_name = Global.symbol ~module_name:prefix g in
+          Cglobal { name; internal_name; type_ = cty }
   ) ir_mod.exports
 
 let int_registers =
@@ -253,8 +260,15 @@ let generate_cstub prefix export =
       stable_result ^
       result_return ^ "}" in
 
+  let generate_global_stub (glob: c_global) =
+    let ty_str = string_of_ctype glob.type_ in
+    let extern = Printf.sprintf "extern %s;\n" glob.internal_name in
+    let decl = Printf.sprintf "%s* %s = &%s;\n" ty_str glob.name glob.internal_name in
+    [extern; decl] in
+
   match export with
     | Cfunc func -> [generate_func_stub func]
+    | Cglobal glob -> generate_global_stub glob
     | _ -> []
 
 let header ~prefix ~exports ~(ir_mod: Stackless.module_) =
@@ -262,6 +276,7 @@ let header ~prefix ~exports ~(ir_mod: Stackless.module_) =
     let header_prefix_path = Util.Command_line.header_prefix_path () in
     Util.Files.read_text_file header_prefix_path in
 
+  (*
   let header_imports =
     let imported_functions =
       let function_extern (_, f) =
@@ -298,6 +313,7 @@ let header ~prefix ~exports ~(ir_mod: Stackless.module_) =
      imported_table]
     |> List.concat
     |> String.concat "\n" in
+*)
 
   let header_exports =
     List.map (fun exp ->

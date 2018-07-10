@@ -195,7 +195,7 @@ void spectest_cfunc_print_f64(double d) {
   printf("spectest.print_f64(%g)\n", d);
 }
 
-void spectest_func_print_f64_f64(double d1, double d2) {
+void spectest_cfunc_print_f64_f64(double d1, double d2) {
   printf("spectest.print_f64_f64(%g %g)\n", d1, d2);
 }
 

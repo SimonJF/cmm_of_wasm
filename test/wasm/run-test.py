@@ -304,7 +304,7 @@ class CWriter(object):
       field = module_name + "_cfunc_" + field
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
     elif type_ == 'get':
-      field = module_name + "_global_" + field
+      field = module_name + "_cglobal_" + field
       return '*%s' % field
     else:
       raise Error('Unexpected action type: %s' % type_)

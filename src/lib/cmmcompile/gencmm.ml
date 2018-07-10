@@ -1036,8 +1036,9 @@ let module_globals env (ir_mod: Stackless.module_) export_info =
         | None -> []) |> List.concat in
 
     let make_symbol dat =
+      let symb = Compile_env.global_symbol g env in
       exported_symbols @
-        [Cdefine_symbol (Compile_env.global_symbol g env); dat] in
+        [Cglobal_symbol symb; Cdefine_symbol symb; dat] in
 
     match Global.data g with
       | DefinedGlobal { initial_value = Constant lit } ->
