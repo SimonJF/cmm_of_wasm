@@ -47,14 +47,6 @@ typedef enum {
   WASM_RT_TRAP_EXHAUSTION,         /** Call stack exhausted. */
 } wasm_rt_trap_t;
 
-/** Value types. Used to define function signatures. */
-typedef enum {
-  WASM_RT_I32,
-  WASM_RT_I64,
-  WASM_RT_F32,
-  WASM_RT_F64,
-} wasm_rt_type_t;
-
 /** A function type for all `anyfunc` functions in a Table. All functions are
  * stored in this canonical form, but must be cast to their proper signature to
  * call. */
@@ -62,8 +54,8 @@ typedef void (*wasm_rt_anyfunc_t)(void);
 
 /** A single element of a Table. */
 typedef struct {
-  /** The index as returned from `wasm_rt_register_func_type`. */
-  uint32_t func_type;
+  /** The function type hash **/
+  uint64_t func_type;
   /** The function. The embedder must know the actual C signature of the
    * function and cast to it before calling. */
   wasm_rt_anyfunc_t func;
@@ -96,28 +88,6 @@ typedef struct {
  *
  *  This is typically called by the generated code, and not the embedder. */
 extern void wasm_rt_trap(wasm_rt_trap_t) __attribute__((noreturn));
-
-/** Register a function type with the given signature. The returned function
- * index is guaranteed to be the same for all calls with the same signature.
- * The following varargs must all be of type `wasm_rt_type_t`, first the
- * params` and then the `results`.
- *
- *  ```
- *    // Register (func (param i32 f32) (result i64)).
- *    wasm_rt_register_func_type(2, 1, WASM_RT_I32, WASM_RT_F32, WASM_RT_I64);
- *    => returns 1
- *
- *    // Register (func (result i64)).
- *    wasm_rt_register_func_type(0, 1, WASM_RT_I32);
- *    => returns 2
- *
- *    // Register (func (param i32 f32) (result i64)) again.
- *    wasm_rt_register_func_type(2, 1, WASM_RT_I32, WASM_RT_F32, WASM_RT_I64);
- *    => returns 1
- *  ``` */
-extern uint32_t wasm_rt_register_func_type(uint32_t params,
-                                           uint32_t results,
-                                           ...);
 
 /** Initialize a Memory object with an initial page size of `initial_pages` and
  * a maximum page size of `max_pages`.
