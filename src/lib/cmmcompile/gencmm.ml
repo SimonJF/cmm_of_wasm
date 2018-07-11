@@ -413,8 +413,8 @@ let compile_binop env op v1 v2 =
     | Min -> min_or_max ~is_f32:true ~is_min:true
     | Max -> min_or_max ~is_f32:true ~is_min:false
     | CopySign ->
-        f32_of_f64 @@ Cop (Cextcall ("copysign", typ_float, false, None),
-          [f64_of_f32 @@ Cvar i1; f64_of_f32 @@ Cvar i2], nodbg) in
+        Cop (Cextcall ("copysignf", typ_float, false, None),
+          [Cvar i1; Cvar i2], nodbg) in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
@@ -434,33 +434,40 @@ let compile_unop env op v =
       | Ctz -> Cop (call "wasm_rt_ctz", [arg], nodbg)
       | Popcnt -> Cop (call "wasm_rt_popcount", [arg], nodbg) in
 
-  let compile_float_op arg_f result_f =
+  let compile_float_op ~is_32 =
     let open Libwasm.Ast.FloatOp in
+
     let i = lv env v in
     let call name =
-      Cop (Cextcall (name, typ_float, false, None), [arg_f @@ Cvar i], nodbg)
-      |> result_f in
-    function
-      | Neg -> Cop (Cnegf, [arg_f @@ Cvar i], nodbg) |> result_f
-      | Abs -> Cop (Cabsf, [arg_f @@ Cvar i], nodbg) |> result_f
-      | Ceil -> call "ceil"
-      | Floor -> call "floor"
-      | Trunc -> call "trunc"
-      | Nearest ->
-          (* Nearest is *frustratingly close* to C's round function, but alas special-cases
-           * the numbers between -1 and 0, and 0 and 1. Since we have to do a C call to
-           * round anyway, it's easiest to just implement nearest in the RTS. *)
-          call "wasm_rt_nearest_f64"
-      | Sqrt -> call "sqrt" in
+      Cop (Cextcall (name, typ_float, false, None), [Cvar i], nodbg) in
 
-  let compile_float64_op = compile_float_op (fun x -> x) (fun x -> x) in
-  let compile_float32_op = compile_float_op f64_of_f32 f32_of_f64 in
+    let call_floats f32_name f64_name =
+      if is_32 then call f32_name
+      else call f64_name in
+
+    function
+      (* Unfortunately, in 32-bit mode, we need to do an RTS call since
+       * the cast-to-64-bit trick loses information when combined with
+       * neg and abs, it seems. Nonsense to do with NaNs. *)
+      | Neg ->
+          if is_32 then call "wasm_rt_neg_f32"
+          else Cop (Cnegf, [Cvar i], nodbg)
+      | Abs ->
+          if is_32 then call "fabsf"
+          else Cop (Cabsf, [Cvar i], nodbg)
+      | Ceil ->
+          if is_32 then call "ceilf"
+          else call "ceil"
+      | Floor -> call_floats "floorf" "floor"
+      | Trunc -> call_floats "truncf" "trunc"
+      | Nearest -> call_floats "nearbyintf" "nearbyint"
+      | Sqrt -> call_floats "sqrtf" "sqrt" in
 
   match op with
     | I32 i32op -> compile_int_op ~is_32:true i32op
     | I64 i64op -> compile_int_op ~is_32:false i64op
-    | F32 f32op -> compile_float32_op f32op
-    | F64 f64op -> compile_float64_op f64op
+    | F32 f32op -> compile_float_op ~is_32:true f32op
+    | F64 f64op -> compile_float_op ~is_32:false f64op
 
 let compile_cvtop env op v =
   let open Libwasm.Values in

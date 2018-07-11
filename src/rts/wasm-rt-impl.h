@@ -105,6 +105,8 @@ f32 wasm_rt_convert_f32_u64(u64 f);
 f64 wasm_rt_convert_f64_u32(u32 f);
 f64 wasm_rt_convert_f64_u64(u64 f);
 
+f32 wasm_rt_neg_f32(f32 f);
+
 #ifdef __cplusplus
 }
 #endif

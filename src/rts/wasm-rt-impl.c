@@ -106,16 +106,6 @@ u64 wasm_rt_ctz_u64(u64 i) {
   return __builtin_ctzll(i);
 }
 
-f64 wasm_rt_nearest_f64(f64 f) {
-  if (f > -1.0 && f < 0.0) {
-    return -0.0;
-  } else if (f > 0.0 && f < 1.0) {
-    return 0.0;
-  } else {
-    return round(f);
-  }
-}
-
 /* This is *hideous*. */
 f32 wasm_rt_zero_min_f32(f32 f1, f32 f2) {
   if (signbit(f1)) {
@@ -245,3 +235,6 @@ f64 wasm_rt_convert_f64_u64(u64 i) {
   return ((f64) i);
 }
 
+f32 wasm_rt_neg_f32(f32 f) {
+  return (-f);
+}
