@@ -967,7 +967,8 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
       | Some md ->
           let symbol_name = Compile_env.func_symbol md env in
           let fn_symbol = Cconst_symbol symbol_name in
-          Cop (Capply typ_void, [fn_symbol], nodbg)
+          let fuel = Cconst_int (Util.Command_line.initial_fuel ()) in
+          Cop (Capply typ_void, [fn_symbol; fuel], nodbg)
       | _ -> Ctuple [] in
 
   (* Sequence all instructions. Later passes perform the `() ; M ~~> M`
