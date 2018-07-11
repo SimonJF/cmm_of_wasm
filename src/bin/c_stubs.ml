@@ -245,7 +245,7 @@ let generate_cstub prefix export =
         Printf.sprintf "%s (result_asm)" result_register in
 
     let push_registers =
-      "  asm (\"push %%rbp\\n\\t\" \"push %%rsi\" : );\n" in
+      "  asm (\"push %%rbp\" : );\n" in
 
     let internal_name = Func.symbol prefix func.ir_func in
 
@@ -253,8 +253,8 @@ let generate_cstub prefix export =
       defined_registers ^
       result_decl ^
       push_registers ^
-      (Printf.sprintf "  asm volatile(\"call %s\\n\\t\" \"pop %s\\n\\t\" \"pop %s\" : %s : "
-        internal_name "%%rsi" "%%rbp" result_assignment) ^
+      (Printf.sprintf "  asm volatile(\"call %s\\n\\t\" \"pop %s\" : %s : "
+        internal_name "%%rbp" result_assignment) ^
       formatted_register_map ^ " : " ^
       clobbered_registers ^ ");\n" ^
       stable_result ^
@@ -345,17 +345,17 @@ let stub_file ~header_filename ~prefix ~exports =
     let signature = Printf.sprintf "void %s_init()" prefix in
     let all_registers = int_registers @ float_registers in
     let clobbered_registers =
-      List.filter (fun x -> x <> "rsi" && x <> "rbp") all_registers
+      List.filter (fun x ->  x <> "rbp") all_registers
       |> List.map (Printf.sprintf "\"%s\"") in
     let clobbered_registers = ["\"memory\""; "\"cc\""] @ clobbered_registers in
     let clobbered_registers_str = String.concat ", " clobbered_registers in
 
     let push_registers =
-      "  asm (\"push %%rbp\\n\\t\" \"push %%rsi\" : );" in
+      "  asm (\"push %%rbp\" : );" in
 
     let asm_call =
-      (Printf.sprintf "  asm volatile(\"call %s_initinternal\\n\\t\" \"pop %s\\n\\t\" \"pop %s\" : : : %s );"
-      prefix "%%rsi" "%%rbp" clobbered_registers_str) in
+      (Printf.sprintf "  asm volatile(\"call %s_initinternal\\n\\t\" \"pop %s\" : : : %s );"
+      prefix "%%rbp" clobbered_registers_str) in
 
     signature ^ " {" ^ "\n" ^
     push_registers ^ "\n" ^

@@ -180,23 +180,23 @@ void spectest_cfunc_print(void) {
 }
 
 void spectest_cfunc_print_i32(uint32_t i) {
-  printf("spectest.print_i32()\n");
+  printf("spectest.print_i32(%d)\n", i);
 }
 
 void spectest_cfunc_print_f32(float f) {
-  printf("spectest.print_f32()\n");
+  printf("spectest.print_f32(%g)\n", f);
 }
 
 void spectest_cfunc_print_i32_f32(uint32_t i, float f) {
-  printf("spectest.print_i32_f32()\n");
+  printf("spectest.print_i32_f32(%d %g)\n", i, f);
 }
 
 void spectest_cfunc_print_f64(double d) {
-  printf("spectest.print_f64()\n");
+  printf("spectest.print_f64(%g)\n", d);
 }
 
 void spectest_cfunc_print_f64_f64(double d1, double d2) {
-  printf("spectest.print_f64_f64()\n");
+  printf("spectest.print_f64_f64(%g %g)\n", d1, d2);
 }
 
 wasm_rt_table_t spectest_table_table;
