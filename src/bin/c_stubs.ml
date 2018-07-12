@@ -90,7 +90,7 @@ let c_exports ~prefix (ir_mod: Ir.Stackless.module_) : c_export list  =
   List.map (fun (x: Libwasm.Ast.export) ->
     let x = x.it in
     let export_name =
-      Util.Names.(name_to_string x.name |> sanitise) in
+      Util.Names.(string_of_name x.name |> sanitise) in
 
     match x.edesc.it with
       | FuncExport v ->

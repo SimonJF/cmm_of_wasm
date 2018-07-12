@@ -1,11 +1,15 @@
 B ../../../_build/default/src/lib/ir/.ir.objs
 B ../../../_build/default/src/lib/util/.util.objs
+B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/base64
+B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/bytes
 B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/getopt
 B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/libwasm
 B /home/simon/.opam/4.08.0+local-git-patched-branch/lib/ocaml
 FLG -open Ir -w -40
 S .
 S ../util
+S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/base64
+S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/bytes
 S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/getopt
 S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/libwasm
 S /home/simon/.opam/4.08.0+local-git-patched-branch/lib/ocaml

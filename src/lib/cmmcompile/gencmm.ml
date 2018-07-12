@@ -1119,7 +1119,7 @@ let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
 
   List.fold_left (fun acc (x: Libwasm.Ast.export) ->
     let x = x.it in
-    let name = Util.Names.sanitise (Util.Names.name_to_string x.name) in
+    let name = Util.Names.(sanitise (string_of_name x.name)) in
     let add_or_update k v m =
       Int32Map.update k (fun xs_opt ->
         match xs_opt with
@@ -1148,7 +1148,7 @@ let module_function_exports env (ir_mod: Stackless.module_) =
     [Cglobal_symbol name; Cdefine_symbol name; dat] in
   let export_symbol name =
     Printf.sprintf "%s_func_%s" (Compile_env.module_name env) name in
-  let sanitise name = Util.Names.(name_to_string name |> sanitise) in
+  let sanitise name = Util.Names.(string_of_name name |> sanitise) in
 
   List.map (fun (x: Libwasm.Ast.export) ->
     let x = x.it in

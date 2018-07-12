@@ -31,10 +31,9 @@ let create_defined ~name ~(ty: Types.global_type) ~(initial_value: initial_value
   let id = Id.create () in
   (* TODO: Sanitisation / encoding / all that nonsense *)
   let name =
-    match name with
-      | None -> None
-      | Some name -> Some (Util.Names.name_to_string name) in
-
+    let open Util.Names in
+    let f = fun x -> x |> string_of_name |> sanitise in
+    Libwasm.Lib.Option.map f name in
   let data = DefinedGlobal { name; initial_value } in
   { id; type_ = ty; data }
 

@@ -385,7 +385,7 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         let imp = imp.it in
         let decode_and_sanitise s =
           let open Util.Names in
-          s |> name_to_string |> sanitise in
+          s |> string_of_name |> sanitise in
         let module_name = decode_and_sanitise imp.module_name in
         let import_name = decode_and_sanitise imp.item_name in
 

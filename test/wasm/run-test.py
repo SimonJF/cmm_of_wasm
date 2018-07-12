@@ -28,6 +28,7 @@ import re
 import struct
 import subprocess
 import sys
+import hashlib
 
 import utils
 from utils import Error
@@ -107,6 +108,36 @@ def MangleName(s):
       result += 'Z%02X' % ord(c)
   return result
 
+def SanitiseName(name):
+  orig_name = name
+  # Same as in OCaml.
+  if name == "":
+    return "_empty_"
+  re_valid_start = re.compile("[_a-zA-Z]")
+
+  # Valid start
+  if not re_valid_start.match(name[0]):
+    name = "_" + name
+
+  # Dots and dashes
+  p = re.compile("\.")
+  name = p.sub("_dot_", name)
+  p = re.compile("-")
+  name = p.sub("_dash_", name)
+
+  # Silly characters
+  silly_char_re = re.compile("[^_a-zA-Z0-9]")
+  if silly_char_re.search(name):
+    # Generate md5 digest
+    m = hashlib.md5()
+    m.update(orig_name.encode("latin1"))
+    name_hash = m.hexdigest()
+    # Strip out silly chars
+    name = silly_char_re.sub("", name)
+    # Append digest
+    #print("silly string", name, "hash", name_hash)
+    name = name + "_" + name_hash
+  return name
 
 class CWriter(object):
 
@@ -145,7 +176,7 @@ class CWriter(object):
       if command['type'] == 'module':
         name = os.path.basename(command['filename'])
         name = os.path.splitext(name)[0]
-        name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+        name = SanitiseName(name)
         if self.mangle:
           name = MangleName(name)
 
@@ -299,7 +330,7 @@ class CWriter(object):
       field = (module_name + MangleName(action['field']) +
                MangleName(self._ActionSig(action, expected)))
     else:
-      field = re.sub(r'[^a-zA-Z0-9_]', '_', action['field'])
+      field = SanitiseName(action['field'])
     if type_ == 'invoke':
       field = module_name + "_cfunc_" + field
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
