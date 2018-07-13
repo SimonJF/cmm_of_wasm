@@ -36,13 +36,13 @@ After this, you should be able to `cd tests/wasm/` and run `./run-all-tests.py`.
 
 ## Project structure
 
-`src/lib/cmmcompile`: Compiler from the Stackless IR to CMM code
-`src/lib/ir`: Compilation from the WebAssembly AST to a stackless intermediate representation
-`src/lib/util`: Utilities
-`src/bin`: Entry point and build utilities (I will probably split off the build utilities into `lib` at some point)
-`src/rts`: C runtime system, adapted from the `wasm2c` RTS (see https://github.com/webassembly/wabt)
-`test/ounit`: Small OUnit test suite for function type hashes
-`test/wasm`: Scaffolding for running the WebAssembly test suite, adapted from `wasm2c`'s infrastructure
+  * `src/lib/cmmcompile`: Compiler from the Stackless IR to CMM code
+  * `src/lib/ir`: Compilation from the WebAssembly AST to a stackless intermediate representation
+  * `src/lib/util`: Utilities
+  * `src/bin`: Entry point and build utilities (I will probably split off the build utilities into `lib` at some point)
+  * `src/rts`: C runtime system, adapted from the `wasm2c` RTS (see https://github.com/webassembly/wabt)
+  * `test/ounit`: Small OUnit test suite for function type hashes
+  * `test/wasm`: Scaffolding for running the WebAssembly test suite, adapted from `wasm2c`'s infrastructure
 
 ## Acknowledgements
 
