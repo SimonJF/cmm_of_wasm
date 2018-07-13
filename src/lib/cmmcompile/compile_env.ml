@@ -4,16 +4,18 @@ type t = {
   label_count : int;
   module_name : string;
   memory: Ir.Stackless.memory option;
-  table : Ir.Stackless.table option
+  table : Ir.Stackless.table option;
+  imported_function_count: int
 }
 
-let empty ~module_name ~memory ~table = {
+let empty ~module_name ~memory ~table ~imported_function_count = {
   var_env = Ir.Var.Map.empty;
   label_env = Ir.Label.Id.Map.empty;
   label_count = 0;
   module_name;
   memory;
-  table
+  table;
+  imported_function_count
 }
 
 let module_name env = env.module_name
@@ -50,6 +52,8 @@ let memory_symbol env =
     | Some (ImportedMemory { module_name; memory_name }) ->
         Printf.sprintf "%s_memory_%s" module_name memory_name
     | _ -> env.module_name ^ "_internalmemory"
+
+let imported_function_count env = env.imported_function_count
 
 let dump env =
   let open Ir in

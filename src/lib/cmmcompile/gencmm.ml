@@ -785,18 +785,64 @@ let compile_terminator env =
           let that_hash = Cmm_rts.Tables.function_hash env func in
           Cop (Ccmpa Ceq, [Cconst_natint this_hash; that_hash], nodbg) in
 
+        (* Since the number of imported functions is statically known,
+         * we may do a dynamic check to work out whether to call the
+         * imported function using the C calling conventions or the
+         * OCaml calling conventions.
+         *
+         * When we special case "env" and "spectest", this probably won't
+         * be necessary. *)
+        let is_imported_ident = Ident.create "is_imported" in
+        let is_imported_var = Cvar is_imported_ident in
+
+        let func_ptr_ident = Ident.create "func_ptr" in
+        let func_ptr_var = Cvar func_ptr_ident in
+
+        let func_ptr =
+          Cmm_rts.Tables.function_pointer env func_var in
+
+        let is_imported =
+          Cop (
+            Ccmpi Clt, [func_var;
+              Cconst_int (Compile_env.imported_function_count env)], nodbg) in
+
+
+        let import_call_noreturn_indirect args_cvars br_id cont_args_cvars =
+          let call =
+            Cop (Cextcall ("caml_c_call", typ_void, false, None),
+              func_ptr_var :: args_cvars, nodbg) in
+            Csequence (call, Cexit (br_id, cont_args_cvars)) in
+
+        let import_call_return1_indirect args_cvars br_id cont_args_cvars ty =
+            let call =
+              Cop (Cextcall ("caml_c_call", compile_type ty, false, None),
+                func_ptr_var :: args_cvars, nodbg) in
+            Cexit (br_id, call :: cont_args_cvars) in
+
+        let noreturn =
+          fun args_cvars br_id cont_args_cvars ->
+            Cifthenelse (is_imported_var,
+              import_call_noreturn_indirect args_cvars br_id cont_args_cvars,
+              local_call_noreturn func_ptr_var args_cvars br_id cont_args_cvars) in
+
+        let return1 =
+          fun args_cvars br_id cont_args_cvars ty ->
+            Cifthenelse (is_imported_var,
+              import_call_return1_indirect args_cvars br_id cont_args_cvars ty,
+              local_call_return1 func_ptr_var args_cvars br_id cont_args_cvars ty) in
+
         Clet (func_ident, func,
           Cifthenelse (
             in_bounds,
             Cifthenelse (hashes_match,
-              call
-                (local_call_noreturn @@
-                  Cmm_rts.Tables.function_pointer env func_var)
-                (local_call_return1 @@
-                  Cmm_rts.Tables.function_pointer env func_var)
-                ret_tys
-                args
-                cont,
+              Clet (is_imported_ident, is_imported,
+              Clet (func_ptr_ident, func_ptr,
+                call
+                  noreturn
+                  return1
+                  ret_tys
+                  args
+                  cont)),
               trap_function_ty ret_tys TrapCallIndirect),
             trap_function_ty ret_tys TrapCallIndirect
           )
@@ -1184,7 +1230,8 @@ let compile_module name (ir_mod: Stackless.module_) =
     Compile_env.empty
       ~module_name:sanitised_name
       ~memory:ir_mod.memory_metadata
-      ~table:ir_mod.table in
+      ~table:ir_mod.table
+      ~imported_function_count:ir_mod.imported_function_count in
   let (elem_data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in
 

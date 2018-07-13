@@ -74,6 +74,7 @@ type memory =
 
 type module_ = {
     function_metadata : Func.t Util.Maps.Int32Map.t;
+    imported_function_count: int;
     (* Note that function_ir only contains entries for defined
      * (not imported) functions *)
     function_ir: func Util.Maps.Int32Map.t;
