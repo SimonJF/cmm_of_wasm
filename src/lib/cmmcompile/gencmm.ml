@@ -956,8 +956,25 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
             ),
             Clet (root_ident, root, init_data lims)) in
 
-  (* Initialise the table with elements *)
+  (* Allocate table if required, then initialise the table with elements *)
   let table_body =
+    (* If it's a local table, we need to call `wasm_rt_allocate_table`.
+     * If not, we don't need to do anything. *)
+    let init_table =
+      match ir_mod.table with
+        | None -> Ctuple []
+        | Some (ImportedTable _) -> Ctuple []
+        | Some (LocalTable lims) ->
+            let min = Nativeint.of_int32 lims.min in
+            let max =
+              match lims.max with
+                | Some x -> Nativeint.of_int32 x
+                | None -> Nativeint.minus_one in
+            Cop (Cextcall ("wasm_rt_allocate_table", typ_void, false, None),
+              [Cconst_symbol (Compile_env.table_symbol env);
+               Cconst_natint min; Cconst_natint max ], nodbg) in
+    (* Regardless of whether we have a local or imported table, we need to
+     * then copy across all data specified by elems. *)
     let compile_elem (offset, elem_map) =
       Int32Map.fold (fun idx func acc ->
         let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
@@ -967,7 +984,9 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
             Cconst_natint (Nativeint.of_int32 idx)], nodbg) in
         Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx hash symb, acc)
       ) elem_map (Ctuple []) in
-    List.map (compile_elem) ir_mod.table_elems |> call_seq in
+    let init_elems =
+      List.map (compile_elem) ir_mod.table_elems |> call_seq in
+    Csequence (init_table, init_elems) in
 
   let start_body =
     match ir_mod.start with
@@ -1074,16 +1093,10 @@ let module_function_table env (ir_mod: Stackless.module_) export_info =
 
   match ir_table with
     | Some (LocalTable limits) ->
-        let table_size =
-          (Arch.size_int * 2 * (Int32.to_int limits.min)) in
-        let max =
-          match limits.max with
-            | Some m -> m | None -> Int32.zero in
+        (* Table size: 3 words. Pointer to table root, min size, max size. *)
         table_exports @
         [Cdefine_symbol (Compile_env.table_symbol env);
-         Cint (Nativeint.of_int32 limits.min);
-         Cint (Nativeint.of_int32 max);
-         Cskip (table_size)]
+         Cskip (Arch.size_int * 3) ]
     | Some (ImportedTable { limits }) ->
         (* If we're importing a table instead of defining one,
          * then we don't need to do define any table symbols

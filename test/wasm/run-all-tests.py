@@ -13,7 +13,6 @@ STDERR_NAME = "test_stderr.txt"
 
 
 disabled = [
-  "skip-stack-guard-page.wast"
 ]
 
 
