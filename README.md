@@ -46,4 +46,7 @@ After this, you should be able to `cd tests/wasm/` and run `./run-all-tests.py`.
 
 ## Acknowledgements
 
-Thanks to Stephen Dolan, KC Sivaramakrishnan, and Mark Shinwell for useful discussions. Thanks also to Pierre Chambart for sharing an early prototype, and whose IR I used. 
+Thanks to Stephen Dolan, KC Sivaramakrishnan, and Mark Shinwell for useful discussions. Thanks also to Pierre Chambart for sharing an early prototype, and whose IR I used.
+
+This work was funded by an internship at OCaml Labs, who also provided a truly wonderful working environment.
+
