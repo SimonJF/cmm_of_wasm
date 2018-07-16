@@ -597,6 +597,14 @@ let compile_type : Libwasm.Types.value_type -> machtype =
     | F32Type -> typ_float
     | F64Type -> typ_float
 
+let compile_function_return_type : Libwasm.Types.func_type -> machtype =
+  fun fty ->
+    let FuncType (_, ret_tys) = fty in
+    match ret_tys with
+      | [] -> typ_void
+      | [ty] -> compile_type ty
+      | _ -> assert false
+
 let compile_expression env =
   let open Ir.Stackless in
   function
@@ -681,23 +689,29 @@ let compile_terminator env =
   let local_call_noreturn fn_addr =
       (* No return values: typ_void in call, csequence, and branch args *)
     fun args_cvars br_id cont_args_cvars ->
+      (* Calculate new fuel *)
+      let new_fuel = Cop (Csubi, [Cvar fuel_ident; Cconst_int 1], nodbg) in
+      let args_cvars = args_cvars @ [new_fuel] in
       let call = Cop (Capply typ_void, fn_addr :: args_cvars, nodbg) in
       Csequence (call, Cexit (br_id, cont_args_cvars)) in
 
   let local_call_return1 fn_addr =
     fun args_cvars br_id cont_args_cvars ty ->
+      (* Calculate new fuel *)
+      let new_fuel = Cop (Csubi, [Cvar fuel_ident; Cconst_int 1], nodbg) in
+      let args_cvars = args_cvars @ [new_fuel] in
       let call =
         Cop (Capply (compile_type ty), fn_addr :: args_cvars, nodbg) in
       Cexit (br_id, call :: cont_args_cvars) in
 
-  let import_call_noreturn name =
+  let c_call_noreturn name =
     fun args_cvars br_id cont_args_cvars ->
       let call =
         Cop (Cextcall (name, typ_void, false, None),
           args_cvars, nodbg) in
       Csequence (call, Cexit (br_id, cont_args_cvars)) in
 
-  let import_call_return1 name =
+  let c_call_return1 name =
     fun args_cvars br_id cont_args_cvars ty ->
       let call =
         Cop (Cextcall (name, compile_type ty, false, None),
@@ -706,9 +720,7 @@ let compile_terminator env =
 
 
   let call fn_noreturn fn_return1 ret_tys args cont =
-    (* Calculate new fuel *)
-      let new_fuel = Cop (Csubi, [Cvar fuel_ident; Cconst_int 1], nodbg) in
-      let args_cvars = (List.map (fun v -> Cvar (lv env v)) args) @ [new_fuel] in
+      let args_cvars = (List.map (fun v -> Cvar (lv env v)) args) in
       let br_id = Compile_env.lookup_label (Branch.label cont) env in
       let branch_args = Branch.arguments cont in
       let cont_args_cvars =
@@ -762,9 +774,9 @@ let compile_terminator env =
           (* We need slightly different functions based on whether or
            * not the symbol is imported or not (imported calls must
            * use an extcall) *)
-          if Func.is_imported func then
-            (import_call_noreturn symb),
-            (import_call_return1 symb)
+          if Func.uses_c_conventions func then
+            (c_call_noreturn symb),
+            (c_call_return1 symb)
           else
             (local_call_noreturn (Cconst_symbol symb)),
             (local_call_return1 (Cconst_symbol symb)) in
@@ -785,18 +797,61 @@ let compile_terminator env =
           let that_hash = Cmm_rts.Tables.function_hash env func in
           Cop (Ccmpa Ceq, [Cconst_natint this_hash; that_hash], nodbg) in
 
+        (* Since the number of imported functions is statically known,
+         * we may do a dynamic check to work out whether to call the
+         * imported function using the C calling conventions or the
+         * OCaml calling conventions.
+         *
+         * When we special case "env" and "spectest", this probably won't
+         * be necessary. *)
+        let uses_c_ident = Ident.create "uses_c_conventions" in
+        let uses_c_var = Cvar uses_c_ident in
+
+        let func_ptr_ident = Ident.create "func_ptr" in
+        let func_ptr_var = Cvar func_ptr_ident in
+
+        let func_ptr =
+          Cmm_rts.Tables.function_pointer env func_var in
+
+        let uses_c_conventions =
+          Cmm_rts.Tables.uses_c_conventions env func_var in
+
+        let c_call_noreturn_indirect args_cvars br_id cont_args_cvars =
+          let call =
+            Cop (Cextcall_indirect (typ_void, false, None),
+              func_ptr_var :: args_cvars, nodbg) in
+            Csequence (call, Cexit (br_id, cont_args_cvars)) in
+
+        let c_call_return1_indirect args_cvars br_id cont_args_cvars ty =
+            let call =
+              Cop (Cextcall_indirect (compile_type ty, false, None),
+                func_ptr_var :: args_cvars, nodbg) in
+            Cexit (br_id, call :: cont_args_cvars) in
+
+        let noreturn =
+          fun args_cvars br_id cont_args_cvars ->
+            Cifthenelse (uses_c_var,
+              c_call_noreturn_indirect args_cvars br_id cont_args_cvars,
+              local_call_noreturn func_ptr_var args_cvars br_id cont_args_cvars) in
+
+        let return1 =
+          fun args_cvars br_id cont_args_cvars ty ->
+            Cifthenelse (uses_c_var,
+              c_call_return1_indirect args_cvars br_id cont_args_cvars ty,
+              local_call_return1 func_ptr_var args_cvars br_id cont_args_cvars ty) in
+
         Clet (func_ident, func,
           Cifthenelse (
             in_bounds,
             Cifthenelse (hashes_match,
-              call
-                (local_call_noreturn @@
-                  Cmm_rts.Tables.function_pointer env func_var)
-                (local_call_return1 @@
-                  Cmm_rts.Tables.function_pointer env func_var)
-                ret_tys
-                args
-                cont,
+              Clet (uses_c_ident, uses_c_conventions,
+              Clet (func_ptr_ident, func_ptr,
+                call
+                  noreturn
+                  return1
+                  ret_tys
+                  args
+                  cont)),
               trap_function_ty ret_tys TrapCallIndirect),
             trap_function_ty ret_tys TrapCallIndirect
           )
@@ -978,11 +1033,13 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
     let compile_elem (offset, elem_map) =
       Int32Map.fold (fun idx func acc ->
         let hash = Util.Type_hashing.hash_function_type (Func.type_ func) in
+        let uses_c_conventions = Func.uses_c_conventions func in
         let symb = Compile_env.func_symbol func env in
         let cmm_idx =
           Cop (Caddi, [compile_expression env offset;
             Cconst_natint (Nativeint.of_int32 idx)], nodbg) in
-        Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx hash symb, acc)
+        Csequence (Cmm_rts.Tables.set_table_entry env cmm_idx
+          hash symb uses_c_conventions, acc)
       ) elem_map (Ctuple []) in
     let init_elems =
       List.map (compile_elem) ir_mod.table_elems |> call_seq in
@@ -1157,8 +1214,6 @@ let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
  * by Capply calls. *)
 let module_function_exports env (ir_mod: Stackless.module_) =
   let open Libwasm.Ast in
-  let global_symbol name dat =
-    [Cglobal_symbol name; Cdefine_symbol name; dat] in
   let export_symbol name =
     Printf.sprintf "%s_func_%s" (Compile_env.module_name env) name in
   let sanitise name = Util.Names.(string_of_name name |> sanitise) in
@@ -1170,8 +1225,21 @@ let module_function_exports env (ir_mod: Stackless.module_) =
       | FuncExport v ->
           let func = Int32Map.find v.it (ir_mod.function_metadata) in
           let symbol = export_symbol name in
-          let internal_symbol = Compile_env.func_symbol func env in
-          global_symbol symbol (Csymbol_address internal_symbol)
+          let fty = Func.type_ func in
+          let FuncType (arg_tys, _) = Func.type_ func in
+          let ret_ty = compile_function_return_type fty in
+          let internal_symbol =
+            Cconst_symbol (Compile_env.func_symbol func env) in
+          let args_with_tys =
+            List.map (fun ty -> (Ident.create "arg", compile_type ty)) arg_tys in
+          let arg_vars = List.map (fun (ident, _) -> Cvar ident) args_with_tys in
+          [Cfunction {
+              fun_name = symbol;
+              fun_args = args_with_tys;
+              fun_body = (Cop (Capply ret_ty, internal_symbol :: arg_vars, nodbg));
+              fun_codegen_options = [No_CSE];
+              fun_dbg = nodbg
+          }]
       | _ -> []
   ) ir_mod.exports
   |> List.rev
@@ -1184,7 +1252,8 @@ let compile_module name (ir_mod: Stackless.module_) =
     Compile_env.empty
       ~module_name:sanitised_name
       ~memory:ir_mod.memory_metadata
-      ~table:ir_mod.table in
+      ~table:ir_mod.table
+      ~imported_function_count:ir_mod.imported_function_count in
   let (elem_data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in
 
@@ -1195,13 +1264,12 @@ let compile_module name (ir_mod: Stackless.module_) =
   let table = module_function_table env ir_mod export_info in
   let data =
     Cdata
-      ([func_exports;
-        elem_data;
+      ([elem_data;
         memory;
         global_data;
         table
       ] |> List.concat) in
 
-  let funcs = compile_functions env ir_mod @ [init] in
+  let funcs = compile_functions env ir_mod @ func_exports @ [init] in
   funcs @ [data]
 

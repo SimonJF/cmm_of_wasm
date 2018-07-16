@@ -62,7 +62,15 @@ let symbol ~module_name = function
   | DefinedFunction { core_info } ->
       module_name ^ "_funcinternal_" ^ (string_of_int core_info.id)
   | ImportedFunction { import_info } ->
-      import_info.module_name ^ "_cfunc_" ^ import_info.function_name
+      (* "env"-imported functions are treated as unqualified *)
+      if import_info.module_name = "env" then
+        import_info.function_name
+      (* "spectest"-imported functions are qualified, but use C conventions
+       * so must call "cfunc" version of the export *)
+      else if import_info.module_name = "spectest" then
+        import_info.module_name ^ "_cfunc_" ^ import_info.function_name
+      else
+        import_info.module_name ^ "_func_" ^ import_info.function_name
 
 module M = struct
   type nonrec t = t
@@ -76,7 +84,12 @@ module Map = struct
     Format.fprintf ppf "@[<1>{@[%a@ @]}@]" elts s
 end
 
-let is_imported f =
-  match f with
-    | DefinedFunction _ -> false
-    | ImportedFunction _ -> true
+let is_imported = function
+  | DefinedFunction _ -> false
+  | ImportedFunction _ -> true
+
+let uses_c_conventions = function
+  | ImportedFunction { import_info = { module_name = "env" } }
+  | ImportedFunction { import_info = { module_name = "spectest" } } -> true
+  | _ -> false
+
