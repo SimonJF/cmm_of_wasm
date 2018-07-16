@@ -11,6 +11,7 @@ val type_ : t -> Libwasm.Types.func_type
 
 val to_sexpr : t -> Libwasm.Sexpr.sexpr
 val is_imported : t -> bool
+val uses_c_conventions : t -> bool
 val to_string : t -> string
 val symbol : module_name:string -> t -> string
 

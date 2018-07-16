@@ -199,14 +199,19 @@ module Tables = struct
 
   (* Precondition: function ID is normalised (i.e., top 32 bits cleared *)
   let function_offset func_id =
-    Cop (Caddi,
-      [Cop (Cmuli, [func_id; Cconst_int (2 * Arch.size_int)], nodbg);
-       Cconst_int (2 * Arch.size_int)], nodbg)
+    let entry_size = 3 * Arch.size_int in (* hash / ptr / conventions *)
+    Cop (Cmuli, [func_id; Cconst_int entry_size], nodbg)
 
   (* Pointer to table data root *)
   let table_root env =
     let root_symb = Cconst_symbol (Compile_env.table_symbol env) in
     Cop (Cload (Word_int, Mutable), [root_symb], nodbg)
+
+  let pointer_offset func_id =
+    Cop (Caddi, [function_offset func_id; Cconst_int Arch.size_int], nodbg)
+
+  let flag_offset func_id =
+    Cop (Caddi, [function_offset func_id; Cconst_int (2 * Arch.size_int)], nodbg)
 
   let function_hash env func_id =
     let root = table_root env in
@@ -216,27 +221,33 @@ module Tables = struct
 
   let function_pointer env func_id =
     let root = table_root env in
-    let pointer_offset =
-      Cop (Caddi, [function_offset func_id; Cconst_int Arch.size_int], nodbg) in
-    let address = Cop (Caddi, [root; pointer_offset], nodbg) in
+    let address = Cop (Caddi, [root; pointer_offset func_id], nodbg) in
     Cop (Cload (Word_int, Mutable), [address], nodbg)
 
-  let set_table_entry env func_id hash function_name =
+  let uses_c_conventions env func_id =
+    let root = table_root env in
+    let address = Cop (Caddi, [root; flag_offset func_id], nodbg) in
+    Cop (Cload (Word_int, Mutable), [address], nodbg)
+
+  let set_table_entry env func_id hash function_name use_c_conventions=
     let root = table_root env in
     let offset = function_offset func_id in
-    let pointer_offset =
-      Cop (Caddi, [function_offset func_id; Cconst_int Arch.size_int], nodbg) in
-    let hash_address =
-      Cop (Caddi, [root; offset], nodbg) in
-    let pointer_address =
-      Cop (Caddi, [root; pointer_offset], nodbg) in
+    let hash_address = Cop (Caddi, [root; offset], nodbg) in
+    let pointer_address = Cop (Caddi, [root; pointer_offset func_id], nodbg) in
+    let flag_address = Cop (Caddi, [root; flag_offset func_id], nodbg) in
     let store_hash =
       Cop (Cstore (Word_int, Assignment),
         [hash_address; Cconst_natint hash], nodbg) in
     let store_pointer =
       Cop (Cstore (Word_int, Assignment),
         [pointer_address; Cconst_symbol function_name], nodbg) in
-    Csequence (store_hash, store_pointer)
+    let store_flag =
+      let to_store =
+        if use_c_conventions then Cconst_int 1 else Cconst_int 0 in
+      Cop (Cstore (Word_int, Assignment),
+        [flag_address; to_store], nodbg) in
+
+    Csequence (store_hash, Csequence(store_pointer, store_flag))
 
 
 end

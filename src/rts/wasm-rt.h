@@ -59,6 +59,8 @@ typedef struct {
   /** The function. The embedder must know the actual C signature of the
    * function and cast to it before calling. */
   wasm_rt_anyfunc_t func;
+  /** Whether to use the C calling conventions (0 if not) **/
+  uint64_t use_c_conventions;
 } wasm_rt_elem_t;
 
 /** A Memory object. */

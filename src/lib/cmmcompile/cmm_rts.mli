@@ -52,11 +52,13 @@ module Tables : sig
   val count : Compile_env.t -> Cmm.expression
   val function_hash : Compile_env.t -> Cmm.expression -> Cmm.expression
   val function_pointer : Compile_env.t -> Cmm.expression -> Cmm.expression
+  val uses_c_conventions : Compile_env.t -> Cmm.expression -> Cmm.expression
   val set_table_entry :
     Compile_env.t ->
     Cmm.expression -> (* Function ID *)
     nativeint -> (* Hash *)
     string -> (* Function name *)
+    bool -> (* True if function uses C conventions *)
     Cmm.expression
 
 end
