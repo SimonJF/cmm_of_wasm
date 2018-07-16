@@ -58,7 +58,7 @@ let type_ { type_ = GlobalType (typ, _); _ } = typ
 
 let name x =
     match x.data with
-      | DefinedGlobal { name } ->
+      | DefinedGlobal { name ; _ } ->
           begin
             match name with
               | Some name -> name
@@ -69,7 +69,7 @@ let name x =
 
 let print ppf x =
   match x.data with
-    | DefinedGlobal { name } ->
+    | DefinedGlobal { name ; _ } ->
         begin
           match name with
             | Some name -> Format.fprintf ppf "%s" name

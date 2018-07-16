@@ -1,7 +1,0 @@
-(jbuild_version 1)
-
-(library
-  ((name util)
-   (libraries (libwasm getopt str base64))
-  )
-)

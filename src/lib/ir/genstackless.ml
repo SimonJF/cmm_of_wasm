@@ -58,7 +58,10 @@ let ir_term env instrs =
 
           (* Capturing a continuation *)
           let capture_continuation env parameter_tys require_locals =
-            let lbl = Label.create (List.length parameter_tys) require_locals in
+            let lbl =
+              Label.create
+                ~arity:(List.length parameter_tys)
+                ~needs_locals:require_locals in
             (* Create parameters for each argument type required by continuation. *)
             let arg_params = List.map Var.create parameter_tys in
             (* All continuations take the required parameters.
@@ -110,7 +113,7 @@ let ir_term env instrs =
                 let (cont_lbl, cont) = capture_continuation env tys true in
 
                 (* Loop continuation creation *)
-                let loop_lbl = Label.create 0 true in
+                let loop_lbl = Label.create ~arity:0 ~needs_locals:true in
                 let locals = Translate_env.locals env in
                 let loop_params = List.map Var.rename locals in
                 let loop_env =
@@ -140,7 +143,7 @@ let ir_term env instrs =
                 (* For each branch, make a continuation with a fresh label,
                  * containing the instructions in the branch. *)
                 let make_branch instrs =
-                  let lbl = Label.create 0 false in
+                  let lbl = Label.create ~arity:0 ~needs_locals:false in
                   let env = fresh_env in
                   let transformed = transform_instrs env [] instrs in
                   (Branch.create lbl [],
@@ -183,11 +186,11 @@ let ir_term env instrs =
                   Stackless.BrTable { index; es = branches; default } in
                 terminate generated brtable_term
             | Return ->
-                (* NOTE: We don't need to do anything with
-                 * locals here as locals can't escape a function. *)
+                (* We don't need to do anything with locals here as locals
+                 * can't escape a function. *)
                 let function_return = Translate_env.return env in
                 let arity = Label.arity function_return in
-                let (returned, env) = Translate_env.popn_rev arity env in
+                let (returned, _env) = Translate_env.popn_rev arity env in
                 let branch = Branch.create function_return returned in
                 terminate generated (Stackless.Br branch)
             | Call var ->
@@ -327,7 +330,7 @@ let ir_func
 
   (* Create return label *)
   let arity = List.length ret_tys in
-  let ret = Label.create_return arity in
+  let ret = Label.create_return ~arity in
 
   (* Create initial environment with empty stack and locals. *)
   let env : Translate_env.t =
@@ -393,7 +396,9 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
           | FuncImport ty_var ->
               let ty = Int32Map.find ty_var.it types_map in
               let func_metadata =
-                Func.create_imported module_name import_name ty in
+                Func.create_imported
+                  ~module_name
+                  ~function_name:import_name ty in
               let funcs = Int32Map.add f_idx func_metadata fs in
               (funcs, Int32.(add f_idx one), gs, g_idx, t, m)
           | TableImport (TableType (lims, _)) ->
@@ -491,7 +496,6 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     (* Next up, add all of the data definitions *)
     let data =
       let open Libwasm.Ast in
-      let open Libwasm.Values in
       List.map (fun (data_seg: string segment) ->
         let data_seg = data_seg.it in
         let offset = transform_i32_const data_seg.offset in

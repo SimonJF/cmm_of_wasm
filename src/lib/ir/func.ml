@@ -1,5 +1,3 @@
-open Util.Names
-
 type core_info = {
   id : int;
   ty: Libwasm.Types.func_type;
@@ -49,19 +47,19 @@ let to_string t =
 let type_ = function
   | DefinedFunction { core_info } ->
       core_info.ty
-  | ImportedFunction { core_info } ->
+  | ImportedFunction { core_info; _ } ->
       core_info.ty
 
 let to_sexpr x = Libwasm.Sexpr.Atom (to_string x)
 
 let func_id = function
-  | DefinedFunction { core_info } -> core_info.id
-  | ImportedFunction { core_info } -> core_info.id
+  | DefinedFunction { core_info ; _ } -> core_info.id
+  | ImportedFunction { core_info ; _ } -> core_info.id
 
 let symbol ~module_name = function
   | DefinedFunction { core_info } ->
       module_name ^ "_funcinternal_" ^ (string_of_int core_info.id)
-  | ImportedFunction { import_info } ->
+  | ImportedFunction { import_info ; _ } ->
       (* "env"-imported functions are treated as unqualified *)
       if import_info.module_name = "env" then
         import_info.function_name
@@ -89,7 +87,7 @@ let is_imported = function
   | ImportedFunction _ -> true
 
 let uses_c_conventions = function
-  | ImportedFunction { import_info = { module_name = "env" } }
-  | ImportedFunction { import_info = { module_name = "spectest" } } -> true
+  | ImportedFunction { import_info = { module_name = "env" ; _}; _ }
+  | ImportedFunction { import_info = { module_name = "spectest" ; _ }; _ } -> true
   | _ -> false
 

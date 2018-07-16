@@ -52,18 +52,6 @@ let ctype_of_function_type fty =
   let c_args = List.map (ctype_of_wasm_type) args in
   (c_args, ret)
 
-let c_function_pointer func_md =
-  let str = string_of_ctype in
-  let (arg_tys, ret) = ctype_of_function_type (Func.type_ func_md) in
-  let arg_ty_str =
-    List.map (str) arg_tys
-    |> String.concat ", " in
-  (* Perhaps this is goofy API design. We know the module_name will never
-   * be used since the function must be imported, yet still have to supply
-   * it. Could we represent this better? *)
-  let name = Func.symbol ~module_name:"" func_md in
-  Printf.sprintf "%s(*%s)(%s)" (str ret) name arg_ty_str
-
 let signature func =
   let args =
     List.map (fun (n, ty) ->
@@ -77,7 +65,6 @@ let export_func ~function_name func =
     | U32 | U64 -> "i" ^ (string_of_int i)
     | F32 | F64 -> "f" ^ (string_of_int i)
     | Void -> assert false in
-  let open Libwasm.Types in
   let (arg_tys, ret) = ctype_of_function_type (Func.type_ func) in
   let c_args =
     List.mapi (fun i cty ->
@@ -247,7 +234,7 @@ let generate_cstub prefix export =
     let push_registers =
       "  asm (\"push %%rbp\" : );\n" in
 
-    let internal_name = Func.symbol prefix func.ir_func in
+    let internal_name = Func.symbol ~module_name:prefix func.ir_func in
 
     signature func ^ " {\n" ^
       defined_registers ^
@@ -271,49 +258,10 @@ let generate_cstub prefix export =
     | Cglobal glob -> generate_global_stub glob
     | _ -> []
 
-let header ~prefix ~exports ~(ir_mod: Stackless.module_) =
+let header ~prefix ~exports =
   let header_prefix =
     let header_prefix_path = Util.Command_line.header_prefix_path () in
     Util.Files.read_text_file header_prefix_path in
-
-  (*
-  let header_imports =
-    let imported_functions =
-      let function_extern (_, f) =
-        if Func.is_imported f then
-          let ptr = c_function_pointer f in
-          [Printf.sprintf "extern %s;" ptr]
-        else [] in
-      List.map (function_extern) (Int32Map.bindings ir_mod.function_metadata)
-      |> List.concat in
-    let imported_globals =
-      let global_extern (_, g) =
-        if Global.is_imported g then
-          let g_symbol = Global.symbol ~module_name:"" g in
-          let c_ty = ctype_of_wasm_type (Global.type_ g) |> string_of_ctype in
-          [Printf.sprintf "extern %s* %s;" c_ty g_symbol]
-        else [] in
-      List.map (global_extern) (Int32Map.bindings ir_mod.globals)
-      |> List.concat in
-    let imported_memory =
-      match ir_mod.memory_metadata with
-        | Some (ImportedMemory { module_name; memory_name }) ->
-            [Printf.sprintf
-              "extern wasm_rt_memory_t* %s_memory_%s;" module_name memory_name]
-        | _ -> [] in
-    let imported_table =
-      match ir_mod.table with
-        | Some (ImportedTable { module_name; table_name }) ->
-            [Printf.sprintf
-              "extern wasm_rt_table_t* %s_table_%s;" module_name table_name]
-        | _ -> [] in
-    [imported_functions;
-     imported_globals;
-     imported_memory;
-     imported_table]
-    |> List.concat
-    |> String.concat "\n" in
-*)
 
   let header_exports =
     List.map (fun exp ->
@@ -322,7 +270,7 @@ let header ~prefix ~exports ~(ir_mod: Stackless.module_) =
         | Ctable { name } ->
             Printf.sprintf "wasm_rt_table_t* %s;" name
         | Cmemory { name } -> Printf.sprintf "wasm_rt_memory_t* %s;" name
-        | Cglobal { name; type_ } ->
+        | Cglobal { name; type_; _ } ->
             Printf.sprintf "%s* %s;" (string_of_ctype type_) name
     ) exports
     |> String.concat "\n" in

@@ -8,8 +8,6 @@ type cmm_address = Cmm.expression
 
 module Memory = struct
   let nodbg = Debuginfo.none
-  let unimplemented = Ctuple []
-  let int_call name = Cextcall (name, typ_int, false, None)
   let i64_to_native = Int64.to_nativeint
   let page_size =
     Cconst_natint (i64_to_native Libwasm.Memory.page_size)
@@ -25,12 +23,11 @@ module Memory = struct
     (* Root pointer: address of the memory structure *)
     let size_uint32 = 4
 
-    (* CHECK: Caddi, Cadda, or Caddv? Or does it matter not? *)
-    let add_ptr addr offset = Cop (Caddi, [addr; offset], nodbg)
-
     let data_pointer root =
       Cop (Cload (Word_int, Mutable), [root], nodbg)
 
+    (* Unused, but may come in handy. *)
+    (*
     let pages root =
       Cop (Cload (Thirtytwo_unsigned, Mutable),
         [Cop (Caddi, [root; Cconst_int size_int], nodbg)], nodbg)
@@ -38,6 +35,7 @@ module Memory = struct
     let max_pages root =
       Cop (Cload (Thirtytwo_unsigned, Mutable),
         [Cop (Caddi, [root; Cconst_int (size_int + size_uint32)], nodbg)], nodbg)
+    *)
 
     let memory_size root =
       Cop (Cload (Thirtytwo_unsigned, Mutable),

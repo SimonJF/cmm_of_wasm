@@ -2,7 +2,7 @@
 
 A compiler from WebAssembly to native code, via the OCaml backend.
 
-*Very* experimental right now. There are still bugs, the WASM test suite doesn't *quite* work (but it almost does!), and I've not tried compiling any larger applications yet. But still, the core functionality is there.
+*Very* experimental right now. There are still bugs, the compiler itself can be inefficient, I've not tried compiling any larger applications yet, and I haven't yet done any benchmarking. But still, the compiler is feature-complete in that the WASM test suite passes.
 
 The compiler only supports the `amd64` backend of OCaml at the moment (integer size is assumed to be 64-bit).
 
@@ -12,7 +12,7 @@ The compiler currently uses some functionality not present in the main OCaml com
 
 You will also need `libwasm` on an `opam pin`: https://github.com/SimonJF/libwasm.
 
-I believe the only other dependencies are `jbuilder` (I'll do the Dune update soon, promise!), and `getopt`.
+I believe the only other dependencies are `dune` and `getopt`.
 
 After that, simply run `make`.
 

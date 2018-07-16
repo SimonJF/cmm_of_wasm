@@ -53,9 +53,8 @@ let write_file (filename: string) (contents: string) =
   close_out oc
 
 let generate_c_stubs ~header_filename ~prefix (ir_mod:Ir.Stackless.module_) =
-  let open Util.Maps in
   let exports = C_stubs.c_exports ~prefix ir_mod in
-  let header = C_stubs.header ~prefix ~exports ~ir_mod in
+  let header = C_stubs.header ~prefix ~exports in
   let stub = C_stubs.stub_file ~header_filename ~prefix ~exports in
   (header, stub)
 
@@ -154,7 +153,6 @@ let parse_sexpr filename =
 
 let parse_binary filename =
   let input_binary_file =
-    let open Ast in
     let open Source in
     trace ("Loading (" ^ filename ^ ")...");
     let ic = open_in_bin filename in

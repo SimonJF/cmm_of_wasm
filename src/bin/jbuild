@@ -1,6 +1,0 @@
-(jbuild_version 1)
-
-(executable
-  ((name cmm_of_wasm)
-   (libraries (ir cmmcompile util libwasm getopt compiler-libs.optcomp bigarray str))
-))

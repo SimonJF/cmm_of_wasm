@@ -1,7 +1,3 @@
-open Libwasm.Ast
-open Ir.Stackless
-open Cmm
-open C_stubs
 open Util
 
 (* Entry point of the compiler *)

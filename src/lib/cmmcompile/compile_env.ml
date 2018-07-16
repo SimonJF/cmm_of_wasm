@@ -43,13 +43,13 @@ let global_symbol glob env =
 
 let table_symbol env =
   match env.table with
-    | Some (ImportedTable { module_name; table_name }) ->
+    | Some (ImportedTable { module_name; table_name; _ }) ->
         Printf.sprintf "%s_table_%s" module_name table_name
     | _ -> env.module_name ^ "_internaltable"
 
 let memory_symbol env =
   match env.memory with
-    | Some (ImportedMemory { module_name; memory_name }) ->
+    | Some (ImportedMemory { module_name; memory_name; _ }) ->
         Printf.sprintf "%s_memory_%s" module_name memory_name
     | _ -> env.module_name ^ "_internalmemory"
 
@@ -69,7 +69,6 @@ let dump env =
   let print_label_env () =
     let bindings = Label.Id.Map.bindings (env.label_env) in
     List.iter (fun (k, v) ->
-      let open Libwasm in
       Label.Id.print Format.str_formatter k;
       Printf.printf "%s : %d\n"
         (Format.flush_str_formatter ()) v) bindings;

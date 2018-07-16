@@ -107,7 +107,7 @@ and sexpr_of_expr expr =
           "(" ^ (Libwasm.Arrange.cvtop op) ^ ") " ^ v, [] in
   Node (head, inner)
 
-and sexpr_of_func (func: Stackless.func) name =
+and sexpr_of_func (func: Stackless.func) =
   Node ("func",
     [Label.to_sexpr func.return;
      Atom (": " ^ Libwasm.Types.string_of_func_type func.type_);
@@ -125,7 +125,7 @@ let sexpr_of_module (m: Stackless.module_) =
     let body =
       match Int32Map.find_opt i m.function_ir with
         | Some ir ->
-            [ Func.to_sexpr md; sexpr_of_func ir (Func.to_string md) ]
+            [ Func.to_sexpr md; sexpr_of_func ir ]
         | None -> [Func.to_sexpr md] in
     Node ("func", body) in
 

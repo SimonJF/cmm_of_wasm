@@ -131,7 +131,6 @@ let compile_op_normalised signed env op v1 v2 =
     | _ -> compile_op (Cvar i1) (Cvar i2)
 
 let compile_relop env op v1 v2 =
-  let open Libwasm.Ast in
   let open Libwasm.Values in
 
   let cf op ~is_32 =
@@ -146,12 +145,12 @@ let compile_relop env op v1 v2 =
   let compile_float_op ~is_32 =
   let open Libwasm.Ast.FloatOp in
   function
-    | Eq -> cf (Ccmpf CFeq) is_32
-    | Ne -> cf (Ccmpf CFneq) is_32
-    | Lt -> cf (Ccmpf CFlt) is_32
-    | Gt -> cf (Ccmpf CFgt) is_32
-    | Le -> cf (Ccmpf CFle) is_32
-    | Ge -> cf (Ccmpf CFge) is_32 in
+    | Eq -> cf (Ccmpf CFeq) ~is_32
+    | Ne -> cf (Ccmpf CFneq) ~is_32
+    | Lt -> cf (Ccmpf CFlt) ~is_32
+    | Gt -> cf (Ccmpf CFgt) ~is_32
+    | Le -> cf (Ccmpf CFle) ~is_32
+    | Ge -> cf (Ccmpf CFge) ~is_32 in
   let compile_int_op =
   let open Libwasm.Ast.IntOp in
   function
@@ -172,7 +171,6 @@ let compile_relop env op v1 v2 =
     | F64 f64op -> compile_float_op f64op ~is_32:false
 
 let compile_binop env op v1 v2 =
-  let open Libwasm.Ast in
   let open Libwasm.Values in
   let is_32 = match Var.type_ v1 with | I32Type -> true | _ -> false in
   let (i1, i2) = (lv env v1, lv env v2) in
@@ -618,7 +616,7 @@ let compile_expression env =
           Cmm_rts.Globals.get ~symbol ~ty:(Global.type_ g) in
 
         match Global.data g with
-          | DefinedGlobal { initial_value = Constant v} ->
+          | DefinedGlobal { initial_value = Constant v; _ } ->
             (* If global is mutable, then we need to read from
              * its associated symbol. *)
             if Global.is_mutable g then load_global g
@@ -626,7 +624,7 @@ let compile_expression env =
               (* If it's immutable, we may simply return its (compiled) initial
                * value. *)
               compile_value v
-          | DefinedGlobal { initial_value = AnotherGlobal g } ->
+          | DefinedGlobal { initial_value = AnotherGlobal g ; _ } ->
               (* If we're referencing another global, then we know by
                * the specification that the other global *must* be an
                * imported global. *)
@@ -647,7 +645,7 @@ let compile_expression env =
         (Cconst_symbol (Compile_env.memory_symbol env))
         (Cvar (lv env v))
   | Const value -> compile_value value
-  | Test (test, v) ->
+  | Test (_test, v) ->
       let i = lv env v in
       let cmp =
         let open Libwasm.Types in
@@ -952,10 +950,10 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let global_body =
     let memcpy (_, g) =
       match Global.data g with
-        | DefinedGlobal { initial_value = Constant _ } ->
+        | DefinedGlobal { initial_value = Constant _; _ } ->
             (* Defined at symbol export time, we don't need to do anything here. *)
             Ctuple []
-        | DefinedGlobal { initial_value = AnotherGlobal g2 } ->
+        | DefinedGlobal { initial_value = AnotherGlobal g2 ; _ } ->
             let symb = Compile_env.global_symbol g env in
             Cop (Cextcall ("memcpy", typ_void, false, None),
               [ Cconst_symbol symb;
@@ -970,7 +968,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
   let memory_body =
     let open Libwasm.Types in
     let root_ident = Ident.create "data_root" in
-    let init_data lims =
+    let init_data =
       (* Generate memcpy calls to initialise memory *)
       let memcpy (symb, offset, size) =
         let addr = Cop (Caddi,
@@ -983,11 +981,11 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
 
     match ir_mod.memory_metadata with
       | None -> Ctuple []
-      | Some (ImportedMemory { limits }) ->
+      | Some (ImportedMemory _ ) ->
           let root =
             Cop (Cload (Word_int, Mutable),
               [memory_symbol], nodbg) in
-          Clet (root_ident, root, init_data limits)
+          Clet (root_ident, root, init_data)
       | Some (LocalMemory (MemoryType lims)) ->
         (* Initialise struct representing this module's memory *)
         let root =
@@ -1009,7 +1007,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
               [memory_symbol; min_pages; max_pages],
               nodbg
             ),
-            Clet (root_ident, root, init_data lims)) in
+            Clet (root_ident, root, init_data)) in
 
   (* Allocate table if required, then initialise the table with elements *)
   let table_body =
@@ -1125,7 +1123,7 @@ let module_globals env (ir_mod: Stackless.module_) export_info =
         [Cglobal_symbol symb; Cdefine_symbol symb; dat] in
 
     match Global.data g with
-      | DefinedGlobal { initial_value = Constant lit } ->
+      | DefinedGlobal { initial_value = Constant lit; _ } ->
           make_symbol (compile_data_value lit)
       | DefinedGlobal _ ->
           (* We need a symbol, but don't have the global initialisation
@@ -1149,12 +1147,12 @@ let module_function_table env (ir_mod: Stackless.module_) export_info =
       export_info.table_symbols |> List.concat in
 
   match ir_table with
-    | Some (LocalTable limits) ->
+    | Some (LocalTable _) ->
         (* Table size: 3 words. Pointer to table root, min size, max size. *)
         table_exports @
         [Cdefine_symbol (Compile_env.table_symbol env);
          Cskip (Arch.size_int * 3) ]
-    | Some (ImportedTable { limits }) ->
+    | Some (ImportedTable _ ) ->
         (* If we're importing a table instead of defining one,
          * then we don't need to do define any table symbols
          * since we'll use symbols from the other modules *)
@@ -1176,7 +1174,7 @@ let module_memory env (ir_mod: Stackless.module_) export_info =
       let memory_symb =
         [Cdefine_symbol (Compile_env.memory_symbol env); Cskip struct_size] in
       memory_exports @ memory_symb
-    | Some (ImportedMemory { module_name; memory_name }) ->
+    | Some (ImportedMemory _) ->
         memory_exports @ [Csymbol_address (Compile_env.memory_symbol env)]
     | None -> []
 
