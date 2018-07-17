@@ -69,7 +69,7 @@ module Memory = struct
     Cop (Caddi, [MemoryAccessors.data_pointer root; offset], nodbg)
 
 
-  let with_mem_check ~root ~trap_ty ~effective_offset ~chunk ~expr =
+  let with_mem_check ~root ~effective_offset ~chunk ~expr =
     let out_of_bounds =
       Cop (Ccmpa Cgt,
         [Cop (Caddi, [effective_offset; Cconst_int (chunk_size chunk)], nodbg);
@@ -77,7 +77,7 @@ module Memory = struct
 
     Cifthenelse (
       out_of_bounds,
-      trap trap_ty TrapOOB,
+      trap TrapOOB,
       expr)
 
   (* Specific for amd64 right now. *)
@@ -131,7 +131,6 @@ module Memory = struct
     Clet (eo_ident, eo,
       with_mem_check
         ~root
-        ~trap_ty:(trap_ty op.ty)
         ~effective_offset:eo_var
         ~chunk
         ~expr)
@@ -154,7 +153,6 @@ module Memory = struct
     Clet (eo_ident, eo,
       with_mem_check
         ~root
-        ~trap_ty:typ_void
         ~effective_offset:eo_var
         ~chunk
         ~expr)

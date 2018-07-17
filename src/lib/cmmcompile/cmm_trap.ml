@@ -30,22 +30,15 @@ let trap_ty =
     | I32Type | I64Type -> typ_int
     | F32Type | F64Type -> typ_float
 
-(* Traps don't return. But to successfully create join points
- * where one join ends in a trap (for example, memory bounds checks),
- * we need to ensure that the right register type is specified in the
- * call to trap. *)
-let trap ty reason =
-  Cop (Cextcall ("wasm_rt_trap", ty, false, None),
-    [Cconst_int (trap_id reason)], nodbg)
+let trap reason =
+  Cop (Craise Raise_notrace, [Cconst_int (trap_id reason)], nodbg)
 
-let trap_int = trap typ_int
-let trap_float = trap typ_int
-
-let trap_function_ty tys reason =
-  let trap_ty =
-    match tys with
-      | [] -> typ_void
-      | [ty] -> trap_ty ty
-      | _ -> assert false in
-  trap trap_ty reason
+(* We require a toplevel return type annotation to ensure registers
+ * match up. *)
+let with_toplevel_handler toplevel_type expr =
+  let reason_ident = Ident.create "reason" in
+  let handler =
+    Cop (Cextcall ("wasm_rt_trap", toplevel_type, false, None),
+      [Cvar reason_ident], nodbg) in
+  Ctrywith (expr, reason_ident, handler)
 
