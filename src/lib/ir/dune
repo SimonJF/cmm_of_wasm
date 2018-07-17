@@ -1,0 +1,4 @@
+(library
+  (name ir)
+  (libraries libwasm util))
+

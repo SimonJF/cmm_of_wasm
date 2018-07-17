@@ -1,0 +1,5 @@
+(library
+  (name cmmcompile)
+  (libraries ir libwasm util compiler-libs.common
+    compiler-libs.optcomp)
+)
