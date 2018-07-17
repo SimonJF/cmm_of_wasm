@@ -52,31 +52,4 @@ let memory_symbol env =
     | _ -> env.module_name ^ "_internalmemory"
 
 let imported_function_count env = env.imported_function_count
-(*
-let dump env =
-  let open Ir in
 
-  let print_var_env () =
-    let bindings = Var.Map.bindings (env.var_env) in
-    List.iter (fun (k, v) ->
-      Printf.printf "%s : %s"
-        (Var.to_string k)
-    (Ident.unique_name v)) bindings;
-    print_newline () in
-
-  let print_label_env () =
-    let bindings = Label.Id.Map.bindings (env.label_env) in
-    List.iter (fun (k, v) ->
-      Label.Id.print Format.str_formatter k;
-      Printf.printf "%s : %d\n"
-        (Format.flush_str_formatter ()) v) bindings;
-      print_newline () in
-
-  print_endline "Var env:";
-  print_var_env ();
-  print_endline "Label env:";
-  print_label_env ();
-  Printf.printf "Label count: %d\n" env.label_count
-
-  *)
-let dump _ = ()

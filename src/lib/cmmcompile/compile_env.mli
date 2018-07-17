@@ -12,7 +12,6 @@ val lookup_var : Ir.Var.t -> t -> Ident.t
 val bind_label : Ir.Label.t -> t -> int
 val lookup_label : Ir.Label.t -> t -> int
 val module_name : t -> string
-val dump : t -> unit
 
 val imported_function_count : t -> int
 
