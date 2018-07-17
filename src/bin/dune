@@ -3,4 +3,5 @@
   (libraries
      ir cmmcompile util libwasm getopt
      compiler-libs.optcomp bigarray str)
+  ;; (ocamlopt_flags :standard -p )
 )

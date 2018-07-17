@@ -1,99 +1,129 @@
 open Util.Maps
 
 type t = {
-  stack : Var.t list;
-  block_continuation: Label.t;
-  function_return: Label.t;
-  locals: Var.t Int32Map.t;
-  labels: Label.t list;
-  globals: Global.t Int32Map.t;
-  functions: Func.t Int32Map.t;
-  types: Libwasm.Types.func_type Int32Map.t
+  mutable stack : Var.t list;
+  mutable block_continuation: Label.t;
+  mutable function_return: Label.t;
+  mutable locals: Var.t array;
+  mutable labels: Label.t list;
+  globals: Global.t array;
+  functions: Func.t array;
+  types: Libwasm.Types.func_type array
 }
 
 let create ~stack ~continuation ~return ~locals ~globals ~functions ~types =
+  (* Assumes a dense ordering -- which we are guaranteed to have by
+   * OCaml's indexing system *)
+  let array_of_map m =
+    let max_key =
+      match Int32Map.max_binding_opt m with
+        | Some (k, _) -> (Int32.to_int k) + 1
+        | None -> 0 in
+    Array.init max_key (fun k -> Int32Map.find (Int32.of_int k) m) in
+  let locals_arr = array_of_map locals in
   {
   stack;
   block_continuation = continuation;
   function_return = return;
   labels = [continuation];
-  locals;
-  globals;
-  functions;
-  types
+  locals = locals_arr;
+  globals = array_of_map globals;
+  functions = array_of_map functions;
+  types = array_of_map types
 }
+
+let copy env =
+  let locals_copy = Array.copy env.locals in
+  (* Globals, functions, and types do not change throughout execution,
+   * so there is no need to copy them. *)
+  { env with locals = locals_copy }
 
 let continuation env = env.block_continuation
 let return env = env.function_return
 let stack env = env.stack
-let with_continuation lbl env =
-  { env with block_continuation = lbl }
+let set_continuation lbl env =
+  env.block_continuation <- lbl
 
 let push_label lbl env =
-  { env with labels = lbl :: env.labels }
-
-let set_local (var: Libwasm.Ast.var) value env =
-  { env with locals = Int32Map.add (var.it) value (env.locals) }
-
-let get_local (var: Libwasm.Ast.var) env =
-  Int32Map.find (var.it) env.locals
-
-let push x env = { env with stack = x :: (env.stack) }
-
-let pop env =
-  match env.stack with
-    | [] -> failwith "FATAL (pop): Tried to pop from empty virtual stack"
-    | x :: xs -> (x, { env with stack = xs })
-
-let pop2 env =
-  match env.stack with
-    | x :: y :: xs -> ((x, y), { env with stack = xs })
-    | _ -> failwith "FATAL (pop2): Tried to pop from empty virtual stack"
+  env.labels <- lbl :: env.labels
 
 let nth_label (depth_var: Libwasm.Ast.var) env =
-  List.nth env.labels (Int32.to_int depth_var.it) 
+  List.nth env.labels (Int32.to_int depth_var.it)
 
-let popn n env =
-  (* Printf.printf "popn n = %d, height = %d\n" n (List.length env.stack); *)
+let set_local (var: Libwasm.Ast.var) value env =
+  env.locals.(Int32.to_int var.it) <- value
+
+let get_local (var: Libwasm.Ast.var) env =
+  env.locals.(Int32.to_int var.it)
+
+let push x env =
+  env.stack <- (x :: (env.stack))
+
+
+let split_stack stack count =
   let rec go n xs =
     if n = 0 then ([], xs) else
       match xs with
-        | [] -> failwith "FATAL (popn): Tried to pop from empty virtual stack"
+        | [] -> failwith "FATAL (split_stack): Tried to pop from empty virtual stack"
         | x :: xs ->
             let (returned, rest) = go (n - 1) xs in
             (x :: returned, rest) in
-  let (popped, rest) = go n env.stack in
-  popped, { env with stack = rest }
+  go count stack
+
+let peek env =
+  let [@warning "-8"] ([x], _) = split_stack env.stack 1 in
+  x
+
+let peek2 env =
+  let [@warning "-8"] ([x; y], _) = split_stack env.stack 2 in
+  (x, y)
+
+let peekn n env =
+  let (xs, _) = split_stack env.stack n in
+  xs
+
+let peekn_rev n env =
+  let (xs, _) = split_stack env.stack n in
+  List.rev xs
+
+let pop env =
+  let [@warning "-8"] ([x], rest) = split_stack env.stack 1 in
+  env.stack <- rest;
+  x
+
+let pop2 env =
+  let [@warning "-8"] ([x; y], rest) = split_stack env.stack 2 in
+  env.stack <- rest;
+  (x, y)
+
+let popn n env =
+  let (xs, rest) = split_stack env.stack n in
+  env.stack <- rest;
+  xs
 
 let popn_rev n env =
-  let (args_rev, env) = popn n env in
-  (List.rev args_rev, env)
+  let (xs, rest) = split_stack env.stack n in
+  env.stack <- rest;
+  List.rev xs
 
-let with_stack stack env = { env with stack }
-
+let set_stack stack env = env.stack <- stack
 
 let dump_stack env =
   List.map (Var.to_string) env.stack
   |> String.concat " :: "
   |> print_endline
 
-let locals env =
-  Int32Map.bindings env.locals
-  |> List.map snd
+let locals env = Array.to_list env.locals
 
-let with_locals locals env =
-  let (_, new_locals) =
-  List.fold_left (fun (i, acc) v ->
-    let acc = Int32Map.add i v acc in
-    (Int32.(add i one), acc)
-  ) (Int32.zero, Int32Map.empty) locals in
-  { env with locals = new_locals}
+let set_locals locals env =
+  env.locals <- (Array.of_list locals)
 
 let get_global (var: Libwasm.Ast.var) env =
-  Int32Map.find (var.it) env.globals
+  env.globals.(Int32.to_int var.it)
 
 let get_function (var: Libwasm.Ast.var) env =
-  Int32Map.find (var.it) env.functions
+  env.functions.(Int32.to_int var.it)
 
 let get_type (var: Libwasm.Ast.var) env =
-  Int32Map.find (var.it) env.types
+  env.types.(Int32.to_int var.it)
+

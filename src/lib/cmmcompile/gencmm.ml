@@ -20,16 +20,8 @@ let llb env br = ll env (Branch.label br)
 
 let bind_var v env =
   let ident = Ident.create (Var.to_string v) in
-  let env = Compile_env.bind_var v ident env in
-  (ident, env)
-
-let bind_vars vs env =
-  let (acc, env) =
-    List.fold_left (fun (acc, env) v ->
-      let (ident, env) = bind_var v env in
-      (ident :: acc, env)
-    ) ([], env) vs in
-  (List.rev acc, env)
+  let () = Compile_env.bind_var v ident env in
+  ident
 
 let nodbg = Debuginfo.none
 
@@ -858,18 +850,18 @@ let rec compile_body env terminator = function
             (* Bind vars, and build up (ident, machtype) pairs *)
             let (idents_rev, env) =
               List.fold_left (fun (acc, env) v ->
-                let (ident, env) = bind_var v env in
+                let ident = bind_var v env in
                 let mty = compile_type (Var.type_ v) in
                 ((ident, mty) :: acc, env)
               ) ([], env) binders in
             let idents = List.rev idents_rev in
-            let (lbl_id, env) = Compile_env.bind_label lbl env in
+            let lbl_id = Compile_env.bind_label lbl env in
             let catch_clause =
               (lbl_id, idents, compile_term env body) in
             let cont = compile_body env terminator xs in
             Ccatch (rec_flag, [catch_clause], cont)
         | Let (v, e) ->
-            let (ident, env) = bind_var v env in
+            let ident = bind_var v env in
             let e1 = compile_expression env e in
             Clet (ident, e1, compile_body env terminator xs)
         | Effect (SetGlobal (g, v)) ->
@@ -910,7 +902,7 @@ let compile_function (ir_func: Stackless.func) func_md env =
     List.combine ir_func.params arg_tys in
   let (args_rev, env) =
     List.fold_left (fun (acc, env) (param, ty) ->
-      let (ident, env) = bind_var param env in
+      let ident = bind_var param env in
       let cmm_ty = compile_type ty in
       ((ident, cmm_ty) :: acc, env)) ([], env) zipped in
 
@@ -1247,7 +1239,7 @@ let module_function_exports env (ir_mod: Stackless.module_) =
 let compile_module name (ir_mod: Stackless.module_) =
   let sanitised_name = (Util.Names.sanitise name) in
   let env =
-    Compile_env.empty
+    Compile_env.create
       ~module_name:sanitised_name
       ~memory:ir_mod.memory_metadata
       ~table:ir_mod.table
