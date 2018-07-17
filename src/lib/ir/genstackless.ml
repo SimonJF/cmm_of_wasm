@@ -23,29 +23,30 @@ let ir_term env instrs =
           args in
       (lbl, args) in
 
+    let branch_to_continuation cont_label env =
+      let arity = Label.arity cont_label in
+      let (returned, _) = Translate_env.popn_rev arity env in
+      let locals = Translate_env.locals env in
+      (* Some labels (e.g., function returns and calls) don't need to record
+       * new locals *)
+      let args =
+        if (Label.needs_locals cont_label) then
+          returned @ locals
+        else
+          returned in
+      Branch.create cont_label args in
+
+
     (* Main *)
     match instrs with
       | [] ->
-          (* Have:
-            * - A list of generated instructions
-            * - Function return
-            * - Block return *)
-          (* Need: term *)
           let cont_label = (Translate_env.continuation env) in
-          let arity = Label.arity cont_label in
-          let (returned, _) = Translate_env.popn_rev arity env in
-          let locals = Translate_env.locals env in
-          (* Some labels (e.g., function returns and calls) don't need to record
-           * new locals *)
-          let args =
-            if (Label.needs_locals cont_label) then
-              returned @ locals
-            else
-              returned in
-          let return_branch = Branch.create cont_label args in
+          let return_branch = branch_to_continuation cont_label env in
           let terminator = Stackless.Br return_branch in
           terminate generated terminator
       | x :: xs ->
+          let continuation_empty = (xs = []) in
+
           (* Binds a "pushed" variable, records on virtual stack *)
           let bind env x ty =
             let v = Var.create ty in
@@ -82,7 +83,14 @@ let ir_term env instrs =
             (* Codegen continuation *)
             let term = transform_instrs env [] xs in
             let cont = Cont (lbl, arg_params @ local_params, false, term) in
-            (lbl, cont) in
+            (lbl, [cont]) in
+
+          (* Optimisation: Only capture a continuation if required. *)
+          let capture_continuation_if_required env param_tys require_locals =
+            if continuation_empty then
+              (Translate_env.continuation env, [])
+            else
+              capture_continuation env param_tys require_locals in
 
           let nop env = transform_instrs env generated xs in
 
@@ -99,18 +107,21 @@ let ir_term env instrs =
                   (Stackless.Select { cond; ifso; ifnot })
                   (Var.type_ ifso)
             | Block (tys, is) ->
-                (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation env tys true in
+                (* Capture current continuation, if required *)
+                let (cont_lbl, conts) =
+                  capture_continuation_if_required env tys true in
+
                 (* Codegen block, with return set to captured continuation, and push label *)
                 let env =
                   env
                   |> Translate_env.push_label cont_lbl
                   |> Translate_env.with_stack []
                   |> Translate_env.with_continuation cont_lbl in
-                transform_instrs env (cont :: generated) is
+                transform_instrs env (conts @ generated) is
             | Loop (tys, is) ->
-                (* Loop: Capture current continuation. Generate loop continuation. *)
-                let (cont_lbl, cont) = capture_continuation env tys true in
+                (* Loop: Capture current continuation (if required). Generate loop continuation. *)
+                let (cont_lbl, conts) =
+                  capture_continuation_if_required env tys true in
 
                 (* Loop continuation creation *)
                 let loop_lbl = Label.create ~arity:0 ~needs_locals:true in
@@ -128,11 +139,12 @@ let ir_term env instrs =
                 let loop_cont = Cont (loop_lbl, loop_params, true, loop_term) in
 
                 (* Block termination *)
-                terminate (loop_cont :: cont :: generated) (Br loop_branch)
+                terminate (loop_cont :: (conts @ generated)) (Br loop_branch)
             | If (tys, t, f) ->
                 (* Pop condition *)
                 let (cond, env) = Translate_env.pop env in
-                let (cont_lbl, cont) = capture_continuation env tys true in
+                let (cont_lbl, conts) =
+                  capture_continuation_if_required env tys true in
 
                 let fresh_env =
                   env
@@ -143,11 +155,14 @@ let ir_term env instrs =
                 (* For each branch, make a continuation with a fresh label,
                  * containing the instructions in the branch. *)
                 let make_branch instrs =
-                  let lbl = Label.create ~arity:0 ~needs_locals:false in
-                  let env = fresh_env in
-                  let transformed = transform_instrs env [] instrs in
-                  (Branch.create lbl [],
-                   Cont (lbl, [], false, transformed)) in
+                  if instrs = [] then
+                    (branch_to_continuation cont_lbl env, [])
+                  else
+                    let lbl = Label.create ~arity:0 ~needs_locals:false in
+                    let env = fresh_env in
+                    let transformed = transform_instrs env [] instrs in
+                    (Branch.create lbl [],
+                     [Cont (lbl, [], false, transformed)]) in
 
                 (* Make true and false branches *)
                 let branch_t, cont_t = make_branch t in
@@ -157,7 +172,7 @@ let ir_term env instrs =
                 let if_term =
                   Stackless.If { cond; ifso = branch_t; ifnot = branch_f } in
                 (* Finally put the generated continuations on the stack and terminate *)
-                terminate (cont_f :: cont_t :: cont :: generated) if_term
+                terminate (cont_f @ cont_t @ (conts @ generated)) if_term
             | Br nesting ->
                 let (lbl, args) = label_and_args env nesting in
                 let branch = Branch.create lbl args in
@@ -165,13 +180,14 @@ let ir_term env instrs =
             | BrIf nesting ->
                 let (cond, env) = Translate_env.pop env in
                 (* If condition is true, branch, otherwise continue *)
-                let (cont_lbl, cont) = capture_continuation env [] false in
+                let (cont_lbl, conts) =
+                  capture_continuation_if_required env [] false in
                 let (lbl, args) = label_and_args env nesting in
                 let br_branch = Branch.create lbl args in
-                let cont_branch = Branch.create cont_lbl [] in
+                let cont_branch = branch_to_continuation cont_lbl env in
                 let if_term =
                   Stackless.If { cond; ifso = br_branch; ifnot = cont_branch } in
-                terminate (cont :: generated) if_term
+                terminate (conts @ generated) if_term
             | BrTable (vs, def) ->
                 (* Grab the index off the stack *)
                 let (index, env) = Translate_env.pop env in
@@ -197,15 +213,16 @@ let ir_term env instrs =
                 let open Libwasm.Types in
                 let func = Translate_env.get_function var env in
                 let FuncType (arg_tys, ret_tys) = Func.type_ func in
-                (* TODO: Optimise for empty continuations, taking into account
-                 * logic in "[]" case *)
                 (* Grab args to the function *)
                 let (args, env) = Translate_env.popn_rev (List.length arg_tys) env in
                 (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation env ret_tys false in
+                (* TODO: Maybe we can optimise this to not capture an
+                 * empty continuation, but "call" is slightly more complicated *)
+                let (cont_lbl, conts) =
+                  capture_continuation env ret_tys false in
                 let cont_branch = Branch.create cont_lbl [] in
                 (* Terminate *)
-                terminate (cont :: generated) (Stackless.Call {
+                terminate (conts @ generated) (Stackless.Call {
                   func; args; cont = cont_branch
                 })
             | CallIndirect var ->
@@ -215,10 +232,11 @@ let ir_term env instrs =
                 let (func_id, env) = Translate_env.pop env in
                 let (args, env) = Translate_env.popn_rev (List.length arg_tys) env in
                 (* Capture current continuation *)
-                let (cont_lbl, cont) = capture_continuation env ret_tys false in
+                let (cont_lbl, conts) =
+                  capture_continuation env ret_tys false in
                 let cont_branch = Branch.create cont_lbl [] in
                 (* Terminate *)
-                terminate (cont :: generated) (Stackless.CallIndirect {
+                terminate (conts @ generated) (Stackless.CallIndirect {
                   type_ = ty; func = func_id; args; cont = cont_branch
                 })
             | GetLocal var ->
@@ -261,9 +279,6 @@ let ir_term env instrs =
                 bind env (Stackless.Test (testop, v)) Libwasm.Types.I32Type
             | Compare relop ->
                 let (v2, v1), env = Translate_env.pop2 env in
-                (* Turned off for now as I'm confident in the structured control
-                 * representation, and for this to hold, we need to implement
-                 * conversion operators *)
                 let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
                 let _ = assert (v1ty = v2ty) in
                 bind env (Stackless.Compare (relop, v1, v2)) Libwasm.Types.I32Type
