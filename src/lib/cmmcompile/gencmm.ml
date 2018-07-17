@@ -932,7 +932,7 @@ let compile_function (ir_func: Stackless.func) func_md env =
     fun_name = name;
     fun_args = List.rev args_rev @ [(fuel_ident, typ_int)];
     fun_body = body;
-    fun_codegen_options = [No_CSE];
+    fun_codegen_options = [];
     fun_dbg = nodbg
   }
 
@@ -1068,7 +1068,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
     fun_name = name_prefix ^ "initinternal";
     fun_args = [];
     fun_body = body;
-    fun_codegen_options = [No_CSE];
+    fun_codegen_options = [];
     fun_dbg = nodbg
   }
 
@@ -1235,7 +1235,7 @@ let module_function_exports env (ir_mod: Stackless.module_) =
               fun_name = symbol;
               fun_args = args_with_tys;
               fun_body = (Cop (Capply ret_ty, internal_symbol :: arg_vars, nodbg));
-              fun_codegen_options = [No_CSE];
+              fun_codegen_options = [];
               fun_dbg = nodbg
           }]
       | _ -> []
