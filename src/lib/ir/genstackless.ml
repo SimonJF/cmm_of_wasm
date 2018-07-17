@@ -1,5 +1,6 @@
 open Stackless
 open Libwasm.Source
+open Util.Maps
 
 (* IR generation *)
 let terminate
@@ -15,7 +16,7 @@ let ir_term env instrs =
     let label_and_args env (n: Libwasm.Ast.var) =
       let lbl = Translate_env.nth_label n env in
       let arity = Label.arity lbl in
-      let (args, _) = Translate_env.popn_rev arity env in
+      let args = Translate_env.peekn_rev arity env in
       let args =
         if Label.needs_locals lbl then
           args @ (Translate_env.locals env)
@@ -25,7 +26,7 @@ let ir_term env instrs =
 
     let branch_to_continuation cont_label env =
       let arity = Label.arity cont_label in
-      let (returned, _) = Translate_env.popn_rev arity env in
+      let returned = Translate_env.popn_rev arity env in
       let locals = Translate_env.locals env in
       (* Some labels (e.g., function returns and calls) don't need to record
        * new locals *)
@@ -50,15 +51,19 @@ let ir_term env instrs =
           (* Binds a "pushed" variable, records on virtual stack *)
           let bind env x ty =
             let v = Var.create ty in
-            let env = Translate_env.push v env in
+            Translate_env.push v env;
             transform_instrs env (Let (v, x) :: generated) xs in
 
           let bind_local (env: Translate_env.t) (var: var) (x: Var.t) =
-            let env = Translate_env.set_local var x env in
+            Translate_env.set_local var x env;
             transform_instrs env generated xs in
 
           (* Capturing a continuation *)
           let capture_continuation env parameter_tys require_locals =
+            (* We require a fresh environment when capturing the continuation,
+             * so that it doesn't interfere with creating the remainder of the
+             * expression we are translating. *)
+            let env = Translate_env.copy env in
             let lbl =
               Label.create
                 ~arity:(List.length parameter_tys)
@@ -75,11 +80,10 @@ let ir_term env instrs =
             (* Push parameters onto to virtual stack *)
             let stack = Translate_env.stack env in
             let new_stack = (List.rev arg_params) @ stack in
-            let env =
-              let base_env = Translate_env.with_stack new_stack env in
+            Translate_env.set_stack new_stack env;
+            let () =
               if require_locals then
-                Translate_env.with_locals local_params base_env
-              else base_env in
+                Translate_env.set_locals local_params env else () in
             (* Codegen continuation *)
             let term = transform_instrs env [] xs in
             let cont = Cont (lbl, arg_params @ local_params, false, term) in
@@ -98,9 +102,9 @@ let ir_term env instrs =
           match x.it with
             | Unreachable -> terminate generated Stackless.Unreachable
             | Nop -> nop env
-            | Drop -> let (_, env) = Translate_env.pop env in nop env
+            | Drop -> let _ = Translate_env.pop env in nop env
             | Select ->
-                let [@warning "-8"] ([cond; ifnot; ifso], env) =
+                let [@warning "-8"] [cond; ifnot; ifso] =
                   Translate_env.popn 3 env in
                 bind
                   env
@@ -112,11 +116,9 @@ let ir_term env instrs =
                   capture_continuation_if_required env tys true in
 
                 (* Codegen block, with return set to captured continuation, and push label *)
-                let env =
-                  env
-                  |> Translate_env.push_label cont_lbl
-                  |> Translate_env.with_stack []
-                  |> Translate_env.with_continuation cont_lbl in
+                Translate_env.push_label cont_lbl env;
+                Translate_env.set_stack [] env;
+                Translate_env.set_continuation cont_lbl env;
                 transform_instrs env (conts @ generated) is
             | Loop (tys, is) ->
                 (* Loop: Capture current continuation (if required). Generate loop continuation. *)
@@ -127,30 +129,29 @@ let ir_term env instrs =
                 let loop_lbl = Label.create ~arity:0 ~needs_locals:true in
                 let locals = Translate_env.locals env in
                 let loop_params = List.map Var.rename locals in
-                let loop_env =
-                  env
-                  |> Translate_env.push_label loop_lbl
-                  |> Translate_env.with_stack []
-                  |> Translate_env.with_continuation cont_lbl
-                  |> Translate_env.with_locals loop_params in
+                Translate_env.push_label loop_lbl env;
+                Translate_env.set_stack [] env;
+                Translate_env.set_continuation cont_lbl env;
+                Translate_env.set_locals loop_params env;
 
                 let loop_branch = Branch.create loop_lbl locals in
-                let loop_term = transform_instrs loop_env [] is in
+                let loop_term = transform_instrs env [] is in
                 let loop_cont = Cont (loop_lbl, loop_params, true, loop_term) in
 
                 (* Block termination *)
                 terminate (loop_cont :: (conts @ generated)) (Br loop_branch)
             | If (tys, t, f) ->
                 (* Pop condition *)
-                let (cond, env) = Translate_env.pop env in
+                let cond = Translate_env.pop env in
                 let (cont_lbl, conts) =
                   capture_continuation_if_required env tys true in
 
-                let fresh_env =
-                  env
-                  |> Translate_env.push_label cont_lbl
-                  |> Translate_env.with_stack []
-                  |> Translate_env.with_continuation cont_lbl in
+                let fresh_env () =
+                  let env_copy = Translate_env.copy env in
+                  Translate_env.push_label cont_lbl env_copy;
+                  Translate_env.set_stack [] env_copy;
+                  Translate_env.set_continuation cont_lbl env_copy;
+                  env_copy in
 
                 (* For each branch, make a continuation with a fresh label,
                  * containing the instructions in the branch. *)
@@ -159,7 +160,7 @@ let ir_term env instrs =
                     (branch_to_continuation cont_lbl env, [])
                   else
                     let lbl = Label.create ~arity:0 ~needs_locals:false in
-                    let env = fresh_env in
+                    let env = fresh_env () in
                     let transformed = transform_instrs env [] instrs in
                     (Branch.create lbl [],
                      [Cont (lbl, [], false, transformed)]) in
@@ -178,7 +179,7 @@ let ir_term env instrs =
                 let branch = Branch.create lbl args in
                 terminate generated (Br branch)
             | BrIf nesting ->
-                let (cond, env) = Translate_env.pop env in
+                let cond = Translate_env.pop env in
                 (* If condition is true, branch, otherwise continue *)
                 let (cont_lbl, conts) =
                   capture_continuation_if_required env [] false in
@@ -190,7 +191,7 @@ let ir_term env instrs =
                 terminate (conts @ generated) if_term
             | BrTable (vs, def) ->
                 (* Grab the index off the stack *)
-                let (index, env) = Translate_env.pop env in
+                let index = Translate_env.pop env in
                 (* Create branches for all labels in the table *)
                 let make_branch (lbl, args) = Branch.create lbl args in
                 let branches =
@@ -206,7 +207,7 @@ let ir_term env instrs =
                  * can't escape a function. *)
                 let function_return = Translate_env.return env in
                 let arity = Label.arity function_return in
-                let (returned, _env) = Translate_env.popn_rev arity env in
+                let returned = Translate_env.popn_rev arity env in
                 let branch = Branch.create function_return returned in
                 terminate generated (Stackless.Br branch)
             | Call var ->
@@ -214,7 +215,7 @@ let ir_term env instrs =
                 let func = Translate_env.get_function var env in
                 let FuncType (arg_tys, ret_tys) = Func.type_ func in
                 (* Grab args to the function *)
-                let (args, env) = Translate_env.popn_rev (List.length arg_tys) env in
+                let args = Translate_env.popn_rev (List.length arg_tys) env in
                 (* Capture current continuation *)
                 (* TODO: Maybe we can optimise this to not capture an
                  * empty continuation, but "call" is slightly more complicated *)
@@ -229,8 +230,8 @@ let ir_term env instrs =
                 let open Libwasm.Types in
                 let ty = Translate_env.get_type var env in
                 let (FuncType (arg_tys, ret_tys)) = ty in
-                let (func_id, env) = Translate_env.pop env in
-                let (args, env) = Translate_env.popn_rev (List.length arg_tys) env in
+                let func_id = Translate_env.pop env in
+                let args = Translate_env.popn_rev (List.length arg_tys) env in
                 (* Capture current continuation *)
                 let (cont_lbl, conts) =
                   capture_continuation env ret_tys false in
@@ -241,52 +242,52 @@ let ir_term env instrs =
                 })
             | GetLocal var ->
                 let open Translate_env in
-                let env = push (get_local var env) env in
+                push (get_local var env) env;
                 transform_instrs env generated xs
             | SetLocal var ->
-                let (new_val, env) = Translate_env.pop env in
+                let new_val = Translate_env.pop env in
                 bind_local env var new_val
             | TeeLocal var ->
-                let (new_val, _) = Translate_env.pop env in
+                let new_val = Translate_env.peek env in
                 bind_local env var new_val
             | GetGlobal var ->
                 let global = Translate_env.get_global var env in
                 bind env (Stackless.GetGlobal global) (Global.type_ global)
             | SetGlobal var ->
-                let (arg, env) = Translate_env.pop env in
+                let arg = Translate_env.pop env in
                 let global = Translate_env.get_global var env in
                 let stmt = Stackless.Effect (Stackless.SetGlobal (global, arg)) in
                 transform_instrs env (stmt :: generated) xs
             | Load loadop ->
-                let (addr, env) = Translate_env.pop env in
+                let addr = Translate_env.pop env in
                 bind env (Stackless.Load (loadop, addr)) loadop.ty
             | Store storeop ->
-                let (arg, addr), env = Translate_env.pop2 env in
+                let (arg, addr) = Translate_env.pop2 env in
                 let eff =
                   Stackless.Store { op = storeop; index = addr; value = arg } in
                 transform_instrs env (Stackless.Effect eff :: generated) xs
             | MemorySize ->
                 bind env (Stackless.MemorySize) Libwasm.Types.I32Type
             | MemoryGrow ->
-                let (amount, env) = Translate_env.pop env in
+                let amount = Translate_env.pop env in
                 bind env (Stackless.MemoryGrow amount) Libwasm.Types.I32Type
             | Const literal ->
                 let lit = literal.it in
                 let ty = Libwasm.Values.type_of lit in
                 bind env (Stackless.Const lit) ty
             | Test testop ->
-                let (v, env) = Translate_env.pop env in
+                let v = Translate_env.pop env in
                 bind env (Stackless.Test (testop, v)) Libwasm.Types.I32Type
             | Compare relop ->
-                let (v2, v1), env = Translate_env.pop2 env in
+                let (v2, v1) = Translate_env.pop2 env in
                 let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
                 let _ = assert (v1ty = v2ty) in
                 bind env (Stackless.Compare (relop, v1, v2)) Libwasm.Types.I32Type
             | Unary unop ->
-                let (v, env) = Translate_env.pop env in
+                let v = Translate_env.pop env in
                 bind env (Stackless.Unary (unop, v)) (Var.type_ v)
             | Binary binop ->
-                let (v2, v1), env = Translate_env.pop2 env in
+                let (v2, v1) = Translate_env.pop2 env in
                 let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
                 (* As above *)
                 let _ = assert (v1ty = v2ty) in
@@ -302,7 +303,7 @@ let ir_term env instrs =
                     | F32 _ -> F32Type
                     | F64 _ -> F64Type
                   end in
-                let (v, env) = Translate_env.pop env in
+                let v = Translate_env.pop env in
                 bind
                   env
                   (Stackless.Convert (cvtop, v))
@@ -310,32 +311,31 @@ let ir_term env instrs =
           end in
       transform_instrs env [] instrs
 
-let bind_locals env params locals =
-  let var i = Libwasm.Source.(i @@ no_region) in
+let bind_locals params locals =
   (* Firstly, add locals entries for parameters, mapping to the parameter names. *)
-  let (i, env) =
-    List.fold_left (fun (i, env) arg_v ->
-      (Int32.(add i one), Translate_env.set_local (var i) arg_v env)
-    ) (Int32.zero, env) params in
+  let (i, local_map) =
+    List.fold_left (fun (i, m) arg_v ->
+      (Int32.(add i one), Int32Map.add i arg_v m)
+    ) (Int32.zero, Int32Map.empty) params in
 
   (* Finally, add locals entries for locals, let-bind them to default values,
    * and bind them to the fresh variable names. *)
-  let (_, instrs_rev, env) =
-    List.fold_left (fun (i, instrs, env) ty ->
+  let (_, instrs_rev, local_map) =
+    List.fold_left (fun (i, instrs, local_map) ty ->
       let v = Var.create ty in
       let x = Stackless.Const (Libwasm.Values.default_value ty) in
-      let env = Translate_env.set_local (var i) v env in
+      let local_map = Int32Map.add i v local_map in
       let instr = Let (v, x) in
-      (Int32.(add i one), instr :: instrs, env)
-    ) (i, [], env) locals in
-  ((List.rev instrs_rev), env)
+      (Int32.(add i one), instr :: instrs, local_map)
+    ) (i, [], local_map) locals in
+  ((List.rev instrs_rev), local_map)
 
 let ir_func
-    (functions: Func.t Util.Maps.Int32Map.t)
-    (globs: Global.t Util.Maps.Int32Map.t)
+    (functions: Func.t Int32Map.t)
+    (globs: Global.t Int32Map.t)
     (ast_func: Libwasm.Ast.func)
     (func_metadata: Func.t)
-    (type_map: Libwasm.Types.func_type Util.Maps.Int32Map.t) =
+    (type_map: Libwasm.Types.func_type Int32Map.t) =
   let open Libwasm.Types in
   let func = ast_func.it in
   let (FuncType (arg_tys, ret_tys)) as fty =
@@ -347,20 +347,21 @@ let ir_func
   let arity = List.length ret_tys in
   let ret = Label.create_return ~arity in
 
+  (* Populate locals, and set them to their default values. *)
+  let locals = func.locals in
+  let (let_bindings, local_map) = bind_locals arg_params locals in
+
   (* Create initial environment with empty stack and locals. *)
   let env : Translate_env.t =
     Translate_env.create
       ~stack:[]
       ~continuation:ret
       ~return:ret
-      ~locals:Util.Maps.Int32Map.empty
+      ~locals:local_map
       ~globals:globs
       ~types:type_map
       ~functions:functions in
 
-  (* Populate locals, and set them to their default values. *)
-  let locals = func.locals in
-  let (let_bindings, env) = bind_locals env arg_params locals in
   let fn_body = ir_term env func.body in
   let fn_body = { fn_body with body = let_bindings @ fn_body.body } in
   {
@@ -373,7 +374,6 @@ let ir_func
 (* Resolves a WASM global to its payload: either a WASM constant,
  * or a reference to another global *)
 let global_initialiser globals const =
-  let open Util.Maps in
   match List.map (fun i -> i.it) const with
     | [Libwasm.Ast.Const lit] -> Global.Constant lit.it
     | [Libwasm.Ast.GetGlobal i] ->
@@ -384,7 +384,6 @@ let global_initialiser globals const =
 (* FIXME: This is one looooong function. It started small but has
  * grown. It should be split up. *)
 let ir_module (ast_mod: Libwasm.Ast.module_) =
-    let open Util.Maps in
     let module Ast = Libwasm.Ast in
     let ast_mod = ast_mod.it in
     let types_map =
@@ -493,7 +492,6 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
         | _-> failwith "expected constant of length <= 1" in
 
     let table_elems =
-      let open Util.Maps in
       let process_segment (seg: Libwasm.Ast.table_segment) =
         let seg = seg.it in
         let offset = transform_i32_const seg.offset in
