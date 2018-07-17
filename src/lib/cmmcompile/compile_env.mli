@@ -1,15 +1,15 @@
 type t
 
-val empty :
+val create :
   module_name:string ->
   memory:Ir.Stackless.memory option ->
   table:Ir.Stackless.table option ->
   imported_function_count:int ->
   t
 
-val bind_var : Ir.Var.t -> Ident.t -> t -> t
+val bind_var : Ir.Var.t -> Ident.t -> t -> unit
 val lookup_var : Ir.Var.t -> t -> Ident.t
-val bind_label : Ir.Label.t -> t -> (int * t)
+val bind_label : Ir.Label.t -> t -> int
 val lookup_label : Ir.Label.t -> t -> int
 val module_name : t -> string
 val dump : t -> unit

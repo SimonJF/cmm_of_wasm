@@ -114,6 +114,7 @@ let dump_stack env =
   |> print_endline
 
 let locals env = Array.to_list env.locals
+
 let set_locals locals env =
   env.locals <- (Array.of_list locals)
 
