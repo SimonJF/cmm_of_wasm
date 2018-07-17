@@ -36,13 +36,6 @@ let nodbg = Debuginfo.none
 (* Recursive call depth must be bounded. We use a notion of "fuel" for this. *)
 let fuel_ident = Ident.create "FUEL"
 
-(* Preamble: Check if we're out of fuel. If so, trap. *)
-let add_exhaustion_check return_ty func_body =
-  Cifthenelse (
-    Cop (Ccmpi Cle, [Cvar fuel_ident; Cconst_int 0], nodbg),
-    trap return_ty TrapExhaustion,
-    func_body)
-
 (* Integer operations *)
 
 let u32_max = Nativeint.of_string "0x00000000FFFFFFFF"
@@ -190,7 +183,7 @@ let compile_binop env op v1 v2 =
       Clet (norm_i2, normal_i2,
         Cifthenelse (
           Cop (Ccmpi Ceq, [Cvar norm_i2; cmp], nodbg),
-          trap_int TrapDivZero,
+          trap TrapDivZero,
           div_f norm_i1 norm_i2
         )
       )
@@ -225,7 +218,7 @@ let compile_binop env op v1 v2 =
       norm_fn
       (fun norm_i1 norm_i2 ->
         let div = Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg) in
-        div_overflow_check signed norm_i1 norm_i2 div (trap_int TrapIntOverflow)) in
+        div_overflow_check signed norm_i1 norm_i2 div (trap TrapIntOverflow)) in
 
   let rem signed =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
@@ -515,14 +508,14 @@ let compile_cvtop env op v =
 
       Clet (cmp_ident, cmp,
         Cifthenelse (is_nan cmp_var,
-          trap_int TrapInvalidConversion,
+          trap TrapInvalidConversion,
           Clet (result_ident, int_of_float cmp_var,
           Cifthenelse (
               Cop (Cor, [
                 Cop (Ccmpf CFlt, [cmp_var; min], nodbg);
                 Cop (Ccmpf max_op, [cmp_var; max], nodbg)
               ], nodbg),
-            trap_int TrapIntOverflow,
+            trap TrapIntOverflow,
             ri_var)))) in
 
     let truncate_unsigned_float is_float_32 =
@@ -730,9 +723,7 @@ let compile_terminator env =
         | _ -> assert false in
   function
     | Unreachable ->
-        (* FIXME: Dodgy. We'll need some more info to decide whether to
-         * trap_int or trap_float. *)
-        trap_int TrapUnreachable
+        trap TrapUnreachable
     | Br b -> branch b
     | BrTable { index ; es ; default } ->
         (* Bounds check needs to be done at runtime. *)
@@ -850,8 +841,8 @@ let compile_terminator env =
                   ret_tys
                   args
                   cont)),
-              trap_function_ty ret_tys TrapCallIndirect),
-            trap_function_ty ret_tys TrapCallIndirect
+              trap TrapCallIndirect),
+            trap TrapCallIndirect
           )
         )
 
@@ -910,10 +901,10 @@ let compile_function (ir_func: Stackless.func) func_md env =
   (* Arguments: Need to bind each param in the env we will
    * use to compile the function, and pair with machtype *)
   let FuncType (arg_tys, ret_tys) = Func.type_ func_md in
-  let tty =
+  let return_ty =
     match ret_tys with
       | [] -> typ_void
-      | [x] -> trap_ty x
+      | [ty] -> compile_type ty
       | _ -> assert false in
   let zipped =
     List.combine ir_func.params arg_tys in
@@ -922,11 +913,20 @@ let compile_function (ir_func: Stackless.func) func_md env =
       let (ident, env) = bind_var param env in
       let cmm_ty = compile_type ty in
       ((ident, cmm_ty) :: acc, env)) ([], env) zipped in
+
+  (* Preamble: Check if we're out of fuel. If so, trap. *)
+  let with_exhaustion_check func_body =
+    Cifthenelse (
+      Cop (Ccmpi Cle, [Cvar fuel_ident; Cconst_int 0], nodbg),
+      trap TrapExhaustion,
+      func_body) in
+
   (* With updated env, compile function body *)
   let body =
     compile_term env ir_func.body
     |> normalise_function ret_tys
-    |> add_exhaustion_check tty in
+    |> with_exhaustion_check
+    |> Cmm_trap.with_toplevel_handler return_ty in
   (* Finally, we can put it all together... *)
   {
     fun_name = name;
