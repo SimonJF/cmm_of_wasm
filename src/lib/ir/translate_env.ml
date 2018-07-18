@@ -47,14 +47,14 @@ let set_continuation lbl env =
 let push_label lbl env =
   env.labels <- lbl :: env.labels
 
-let nth_label (depth_var: Libwasm.Ast.var) env =
-  List.nth env.labels (Int32.to_int depth_var.it)
+let nth_label (depth_var: Annotated.var) env =
+  List.nth env.labels (Int32.to_int depth_var)
 
-let set_local (var: Libwasm.Ast.var) value env =
-  env.locals.(Int32.to_int var.it) <- value
+let set_local (var: Annotated.var) value env =
+  env.locals.(Int32.to_int var) <- value
 
-let get_local (var: Libwasm.Ast.var) env =
-  env.locals.(Int32.to_int var.it)
+let get_local (var: Annotated.var) env =
+  env.locals.(Int32.to_int var)
 
 let push x env =
   env.stack <- (x :: (env.stack))
@@ -118,12 +118,12 @@ let locals env = Array.to_list env.locals
 let set_locals locals env =
   env.locals <- (Array.of_list locals)
 
-let get_global (var: Libwasm.Ast.var) env =
-  env.globals.(Int32.to_int var.it)
+let get_global (var: Annotated.var) env =
+  env.globals.(Int32.to_int var)
 
-let get_function (var: Libwasm.Ast.var) env =
-  env.functions.(Int32.to_int var.it)
+let get_function (var: Annotated.var) env =
+  env.functions.(Int32.to_int var)
 
-let get_type (var: Libwasm.Ast.var) env =
-  env.types.(Int32.to_int var.it)
+let get_type (var: Annotated.var) env =
+  env.types.(Int32.to_int var)
 

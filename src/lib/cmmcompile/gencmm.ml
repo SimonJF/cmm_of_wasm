@@ -1171,14 +1171,12 @@ let module_memory env (ir_mod: Stackless.module_) export_info =
     | None -> []
 
 let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
-  let open Libwasm.Ast in
   let empty =
     { func_symbols = Int32Map.empty;
       global_symbols = Int32Map.empty;
       memory_symbols = []; table_symbols = [] } in
 
-  List.fold_left (fun acc (x: Libwasm.Ast.export) ->
-    let x = x.it in
+  List.fold_left (fun acc (x: Annotated.export) ->
     let name = Util.Names.(sanitise (string_of_name x.name)) in
     let add_or_update k v m =
       Int32Map.update k (fun xs_opt ->
@@ -1187,11 +1185,11 @@ let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
           | None -> Some [v]
       ) m in
 
-    match x.edesc.it with
+    match x.edesc with
       | FuncExport v ->
-          { acc with func_symbols = add_or_update v.it name acc.func_symbols }
+          { acc with func_symbols = add_or_update v name acc.func_symbols }
       | GlobalExport v ->
-          { acc with global_symbols = add_or_update v.it name acc.global_symbols }
+          { acc with global_symbols = add_or_update v name acc.global_symbols }
       | TableExport _ ->
           { acc with table_symbols = name :: acc.table_symbols }
       | MemoryExport _ ->
@@ -1203,17 +1201,15 @@ let split_exports : Stackless.module_ -> export_info = fun ir_mod ->
  * can straightforwardly refer to a function pointer, which can be used directly
  * by Capply calls. *)
 let module_function_exports env (ir_mod: Stackless.module_) =
-  let open Libwasm.Ast in
   let export_symbol name =
     Printf.sprintf "%s_func_%s" (Compile_env.module_name env) name in
   let sanitise name = Util.Names.(string_of_name name |> sanitise) in
 
-  List.map (fun (x: Libwasm.Ast.export) ->
-    let x = x.it in
+  List.map (fun (x: Annotated.export) ->
     let name = sanitise x.name in
-    match x.edesc.it with
+    match x.edesc with
       | FuncExport v ->
-          let func = Int32Map.find v.it (ir_mod.function_metadata) in
+          let func = Int32Map.find v (ir_mod.function_metadata) in
           let symbol = export_symbol name in
           let fty = Func.type_ func in
           let FuncType (arg_tys, _) = Func.type_ func in

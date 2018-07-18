@@ -26,7 +26,9 @@ let compile_module ~output_file ~prefix module_ =
   (* Validate the module *)
   Libwasm.Valid.check_module module_;
   (* Generate stackless IR representation *)
-  let ir = Ir.Genstackless.ir_module module_ in
+  let ir =
+    Ir.Genannotated.translate_module module_
+    |> Ir.Genstackless.ir_module in
   dump_stackless ir;
   (* Compile to CMM *)
   let cmm_phrases = Cmmcompile.Gencmm.compile_module prefix ir in

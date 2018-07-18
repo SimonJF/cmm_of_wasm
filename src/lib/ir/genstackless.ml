@@ -1,8 +1,8 @@
+(* Second IR generation pass: from Annotated IR to Stackless
+ * IR. Virtualises stack and puts local variables into SSA. *)
 open Stackless
-open Libwasm.Source
 open Util.Maps
 
-(* IR generation *)
 let terminate
   (code: Stackless.statement list)
   (terminator: Stackless.terminator) = {
@@ -11,38 +11,32 @@ let terminate
 }
 
 let ir_term env instrs =
-  let open Libwasm.Ast in
+  let open Annotated in
   let rec transform_instrs env generated (instrs: instr list) =
-    let label_and_args env (n: Libwasm.Ast.var) =
-      let lbl = Translate_env.nth_label n env in
-      let arity = Label.arity lbl in
-      let args = Translate_env.peekn_rev arity env in
-      let args =
-        if Label.needs_locals lbl then
-          args @ (Translate_env.locals env)
-        else
-          args in
-      (lbl, args) in
 
-    let branch_to_continuation cont_label env =
+    let modified_locals lbl env =
+      let locals = Label.local_ids lbl in
+      List.map (fun id -> Translate_env.get_local id env) locals in
+
+    (* Creates a branch to a given continuation. The `peek` parameter
+     * determines whether the creation of the branch should modify
+     * the virtual stack. When branches as part of
+     * a construct (for example, a BrTable), it is important not to modify
+     * the stack, otherwise it will be corrupt when translating other branches. *)
+    let branch_to_continuation ~peek cont_label env =
       let arity = Label.arity cont_label in
-      let returned = Translate_env.popn_rev arity env in
-      let locals = Translate_env.locals env in
-      (* Some labels (e.g., function returns and calls) don't need to record
-       * new locals *)
-      let args =
-        if (Label.needs_locals cont_label) then
-          returned @ locals
-        else
-          returned in
+      let returned =
+        if peek then Translate_env.peekn_rev arity env
+        else Translate_env.popn_rev arity env in
+      (* Propagate the locals that may have been modified *)
+      let args = returned @ (modified_locals cont_label env) in
       Branch.create cont_label args in
-
 
     (* Main *)
     match instrs with
       | [] ->
           let cont_label = (Translate_env.continuation env) in
-          let return_branch = branch_to_continuation cont_label env in
+          let return_branch = branch_to_continuation ~peek:false cont_label env in
           let terminator = Stackless.Br return_branch in
           terminate generated terminator
       | x :: xs ->
@@ -59,7 +53,7 @@ let ir_term env instrs =
             transform_instrs env generated xs in
 
           (* Capturing a continuation *)
-          let capture_continuation env parameter_tys require_locals =
+          let capture_continuation env parameter_tys modified_locals =
             (* We require a fresh environment when capturing the continuation,
              * so that it doesn't interfere with creating the remainder of the
              * expression we are translating. *)
@@ -67,39 +61,39 @@ let ir_term env instrs =
             let lbl =
               Label.create
                 ~arity:(List.length parameter_tys)
-                ~needs_locals:require_locals in
+                ~local_ids:modified_locals in
             (* Create parameters for each argument type required by continuation. *)
             let arg_params = List.map Var.create parameter_tys in
-            (* All continuations take the required parameters.
-             * Some require the local parameters for SSA form as well.
-             * Calls don't, as calls do not change locals, but blocks may. *)
+            (* All continuations take the arg_params.
+             * We also need to create parameters for each propagated SSA variable,
+             * and set these in the translation environment. *)
             let local_params =
-              if require_locals then
-                List.map Var.rename (Translate_env.locals env)
-              else [] in
+              List.map (fun idx ->
+                let typ = Var.type_ (Translate_env.get_local idx env) in
+                let v = Var.create typ in
+                Translate_env.set_local idx v env;
+                v) modified_locals in
+
             (* Push parameters onto to virtual stack *)
             let stack = Translate_env.stack env in
             let new_stack = (List.rev arg_params) @ stack in
             Translate_env.set_stack new_stack env;
-            let () =
-              if require_locals then
-                Translate_env.set_locals local_params env else () in
             (* Codegen continuation *)
             let term = transform_instrs env [] xs in
             let cont = Cont (lbl, arg_params @ local_params, false, term) in
             (lbl, [cont]) in
 
           (* Optimisation: Only capture a continuation if required. *)
-          let capture_continuation_if_required env param_tys require_locals =
+          let capture_continuation_if_required env param_tys modified_locals =
             if continuation_empty then
               (Translate_env.continuation env, [])
             else
-              capture_continuation env param_tys require_locals in
+              capture_continuation env param_tys modified_locals in
 
           let nop env = transform_instrs env generated xs in
 
           begin
-          match x.it with
+          match x with
             | Unreachable -> terminate generated Stackless.Unreachable
             | Nop -> nop env
             | Drop -> let _ = Translate_env.pop env in nop env
@@ -110,41 +104,64 @@ let ir_term env instrs =
                   env
                   (Stackless.Select { cond; ifso; ifnot })
                   (Var.type_ ifso)
-            | Block (tys, is) ->
+            | Block block_info ->
+                let tys = block_info.block_stack_ty in
+                let mutated_locals = block_info.block_mutated_locals in
+                let is = block_info.block_instrs in
                 (* Capture current continuation, if required *)
                 let (cont_lbl, conts) =
-                  capture_continuation_if_required env tys true in
+                  capture_continuation_if_required env tys mutated_locals in
 
-                (* Codegen block, with return set to captured continuation, and push label *)
+                (* Codegen block, with return set to captured continuation,
+                 * and push label *)
                 Translate_env.push_label cont_lbl env;
                 Translate_env.set_stack [] env;
                 Translate_env.set_continuation cont_lbl env;
                 transform_instrs env (conts @ generated) is
-            | Loop (tys, is) ->
-                (* Loop: Capture current continuation (if required). Generate loop continuation. *)
-                let (cont_lbl, conts) =
-                  capture_continuation_if_required env tys true in
+            | Loop block_info ->
+                let tys = block_info.block_stack_ty in
+                let mutated_locals = block_info.block_mutated_locals in
+                let is = block_info.block_instrs in
 
                 (* Loop continuation creation *)
-                let loop_lbl = Label.create ~arity:0 ~needs_locals:true in
-                let locals = Translate_env.locals env in
-                let loop_params = List.map Var.rename locals in
+                let loop_args =
+                  List.map (fun idx -> Translate_env.get_local idx env) mutated_locals in
+
+                (* Loop: Capture current continuation (if required).
+                 * Generate loop continuation. *)
+                let (cont_lbl, conts) =
+                  capture_continuation_if_required env tys mutated_locals in
+
+                let loop_lbl = Label.create ~arity:0 ~local_ids:mutated_locals in
+                let loop_params =
+                  List.map (fun idx ->
+                    let typ = Var.type_ (Translate_env.get_local idx env) in
+                    let v = Var.create typ in
+                    Translate_env.set_local idx v env;
+                    v) mutated_locals in
+
                 Translate_env.push_label loop_lbl env;
                 Translate_env.set_stack [] env;
                 Translate_env.set_continuation cont_lbl env;
-                Translate_env.set_locals loop_params env;
 
-                let loop_branch = Branch.create loop_lbl locals in
+
+                let loop_branch = Branch.create loop_lbl loop_args in
                 let loop_term = transform_instrs env [] is in
                 let loop_cont = Cont (loop_lbl, loop_params, true, loop_term) in
 
                 (* Block termination *)
                 terminate (loop_cont :: (conts @ generated)) (Br loop_branch)
-            | If (tys, t, f) ->
+            | If cond_info ->
+                let tys = cond_info.conditional_stack_ty in
+                let mutated_locals =
+                  cond_info.conditional_mutated_locals in
+                let t = cond_info.conditional_true_instrs in
+                let f = cond_info.conditional_false_instrs in
+
                 (* Pop condition *)
                 let cond = Translate_env.pop env in
                 let (cont_lbl, conts) =
-                  capture_continuation_if_required env tys true in
+                  capture_continuation_if_required env tys mutated_locals in
 
                 let fresh_env () =
                   let env_copy = Translate_env.copy env in
@@ -157,9 +174,9 @@ let ir_term env instrs =
                  * containing the instructions in the branch. *)
                 let make_branch instrs =
                   if instrs = [] then
-                    (branch_to_continuation cont_lbl env, [])
+                    (branch_to_continuation ~peek:false cont_lbl env, [])
                   else
-                    let lbl = Label.create ~arity:0 ~needs_locals:false in
+                    let lbl = Label.create ~arity:0 ~local_ids:[] in
                     let env = fresh_env () in
                     let transformed = transform_instrs env [] instrs in
                     (Branch.create lbl [],
@@ -175,30 +192,33 @@ let ir_term env instrs =
                 (* Finally put the generated continuations on the stack and terminate *)
                 terminate (cont_f @ cont_t @ (conts @ generated)) if_term
             | Br nesting ->
-                let (lbl, args) = label_and_args env nesting in
-                let branch = Branch.create lbl args in
+                let lbl = Translate_env.nth_label nesting env in
+                let branch = branch_to_continuation ~peek:true lbl env in
                 terminate generated (Br branch)
             | BrIf nesting ->
                 let cond = Translate_env.pop env in
+                let lbl = Translate_env.nth_label nesting env in
                 (* If condition is true, branch, otherwise continue *)
                 let (cont_lbl, conts) =
-                  capture_continuation_if_required env [] false in
-                let (lbl, args) = label_and_args env nesting in
-                let br_branch = Branch.create lbl args in
-                let cont_branch = branch_to_continuation cont_lbl env in
+                  capture_continuation_if_required env [] [] in
+                let branch = branch_to_continuation ~peek:true lbl env in
+                let cont_branch = branch_to_continuation ~peek:false cont_lbl env in
                 let if_term =
-                  Stackless.If { cond; ifso = br_branch; ifnot = cont_branch } in
+                  Stackless.If { cond; ifso = branch; ifnot = cont_branch } in
                 terminate (conts @ generated) if_term
             | BrTable (vs, def) ->
                 (* Grab the index off the stack *)
                 let index = Translate_env.pop env in
                 (* Create branches for all labels in the table *)
-                let make_branch (lbl, args) = Branch.create lbl args in
                 let branches =
                   List.map (fun nest ->
-                    label_and_args env nest |> make_branch) vs in
+                    let lbl = Translate_env.nth_label nest env in
+                    branch_to_continuation ~peek:true lbl env) vs in
                 (* Create default branch *)
-                let default = label_and_args env def |> make_branch in
+                let default =
+                  let lbl = Translate_env.nth_label def env in
+                  branch_to_continuation ~peek:true lbl env in
+
                 let brtable_term =
                   Stackless.BrTable { index; es = branches; default } in
                 terminate generated brtable_term
@@ -220,7 +240,7 @@ let ir_term env instrs =
                 (* TODO: Maybe we can optimise this to not capture an
                  * empty continuation, but "call" is slightly more complicated *)
                 let (cont_lbl, conts) =
-                  capture_continuation env ret_tys false in
+                  capture_continuation env ret_tys [] in
                 let cont_branch = Branch.create cont_lbl [] in
                 (* Terminate *)
                 terminate (conts @ generated) (Stackless.Call {
@@ -234,7 +254,7 @@ let ir_term env instrs =
                 let args = Translate_env.popn_rev (List.length arg_tys) env in
                 (* Capture current continuation *)
                 let (cont_lbl, conts) =
-                  capture_continuation env ret_tys false in
+                  capture_continuation env ret_tys [] in
                 let cont_branch = Branch.create cont_lbl [] in
                 (* Terminate *)
                 terminate (conts @ generated) (Stackless.CallIndirect {
@@ -271,8 +291,7 @@ let ir_term env instrs =
             | MemoryGrow ->
                 let amount = Translate_env.pop env in
                 bind env (Stackless.MemoryGrow amount) Libwasm.Types.I32Type
-            | Const literal ->
-                let lit = literal.it in
+            | Const lit ->
                 let ty = Libwasm.Values.type_of lit in
                 bind env (Stackless.Const lit) ty
             | Test testop ->
@@ -333,11 +352,10 @@ let bind_locals params locals =
 let ir_func
     (functions: Func.t Int32Map.t)
     (globs: Global.t Int32Map.t)
-    (ast_func: Libwasm.Ast.func)
+    (func: Annotated.func)
     (func_metadata: Func.t)
     (type_map: Libwasm.Types.func_type Int32Map.t) =
   let open Libwasm.Types in
-  let func = ast_func.it in
   let (FuncType (arg_tys, ret_tys)) as fty =
     Func.type_ func_metadata in
   (* Create parameter names for each argument type *)
@@ -374,21 +392,19 @@ let ir_func
 (* Resolves a WASM global to its payload: either a WASM constant,
  * or a reference to another global *)
 let global_initialiser globals const =
-  match List.map (fun i -> i.it) const with
-    | [Libwasm.Ast.Const lit] -> Global.Constant lit.it
-    | [Libwasm.Ast.GetGlobal i] ->
-        let g = Int32Map.find (i.it) globals in
+  match const with
+    | [Annotated.Const lit] -> Global.Constant lit
+    | [Annotated.GetGlobal i] ->
+        let g = Int32Map.find i globals in
         Global.AnotherGlobal g
     | _ -> failwith "expected constant of length 1"
 
 (* FIXME: This is one looooong function. It started small but has
  * grown. It should be split up. *)
-let ir_module (ast_mod: Libwasm.Ast.module_) =
-    let module Ast = Libwasm.Ast in
-    let ast_mod = ast_mod.it in
+let ir_module (ast_mod: Annotated.module_) =
     let types_map =
       List.fold_left (fun (i, acc) ty ->
-        let acc = Int32Map.add i (ty.it) acc in
+        let acc = Int32Map.add i ty acc in
         (Int32.(add i one), acc)) (0l, Int32Map.empty) ast_mod.types |> snd in
 
     (* Next, handle imports. *)
@@ -397,18 +413,17 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
      * defined (non-imported) table / memory. *)
     let (func_metadata_map, func_import_count,
          globals, global_import_count, table, memory_metadata) =
-      let open Libwasm.Ast in
+      let open Annotated in
       List.fold_left (fun (fs, f_idx, gs, g_idx, t, m) (imp: import) ->
-        let imp = imp.it in
         let decode_and_sanitise s =
           let open Util.Names in
           s |> string_of_name |> sanitise in
         let module_name = decode_and_sanitise imp.module_name in
         let import_name = decode_and_sanitise imp.item_name in
 
-        match imp.idesc.it with
+        match imp.idesc with
           | FuncImport ty_var ->
-              let ty = Int32Map.find ty_var.it types_map in
+              let ty = Int32Map.find ty_var types_map in
               let func_metadata =
                 Func.create_imported
                   ~module_name
@@ -445,9 +460,9 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
 
     (* Next, prepare all of the defined globals *)
     let globals =
-      List.fold_left (fun (i, acc) (glob: Ast.global) ->
-        let glob = glob.it in
-        let initialiser = global_initialiser acc glob.value.it in
+      List.fold_left (fun (i, acc) (glob: Annotated.global) ->
+        let glob = glob in
+        let initialiser = global_initialiser acc glob.value in
         let ir_global =
           Global.create_defined
             ~name:None
@@ -462,21 +477,21 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
       match ast_mod.memories with
         | [] -> memory_metadata
         | x :: _ ->
-            Some (LocalMemory x.it.mtype) in
+            Some (LocalMemory x.mtype) in
 
     let table =
       let open Libwasm.Types in
       match ast_mod.tables with
         | [] -> table
         | t :: _ ->
-            let TableType (limits, _) = t.it.ttype in
+            let TableType (limits, _) = t.ttype in
             Some (LocalTable limits) in
 
     (* Update the function metadata map with defined functions,
      * starting after the indexing space of the imported functions *)
     let func_metadata_map =
-      List.fold_left (fun (i, acc) (func: Libwasm.Ast.func) ->
-        let ty = Int32Map.find (func.it.ftype.it) types_map in
+      List.fold_left (fun (i, acc) (func: Annotated.func) ->
+        let ty = Int32Map.find (func.ftype) types_map in
         let md = Func.create_defined ty in
         (Int32.(add i one), Int32Map.add i md acc))
       (func_import_count, func_metadata_map) ast_mod.funcs |> snd in
@@ -484,22 +499,21 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
     (* Given a (possibly-empty) integer constant expression, return
      * either the constant value, a global reference,
      * or the default i32 value *)
-    let transform_i32_const : Libwasm.Ast.const -> expr = fun x ->
-      match List.map (fun x -> x.it) x.it with
+    let transform_i32_const : Annotated.const -> expr = fun x ->
+      match x with
         | [] -> Const (Libwasm.Values.default_value Libwasm.Types.I32Type)
-        | [Libwasm.Ast.GetGlobal i] -> GetGlobal (Int32Map.find i.it globals)
-        | [Libwasm.Ast.Const lit] -> Const (lit.it)
+        | [Annotated.GetGlobal i] -> GetGlobal (Int32Map.find i globals)
+        | [Annotated.Const lit] -> Const (lit)
         | _-> failwith "expected constant of length <= 1" in
 
     let table_elems =
-      let process_segment (seg: Libwasm.Ast.table_segment) =
-        let seg = seg.it in
+      let process_segment (seg: Annotated.table_segment) =
         let offset = transform_i32_const seg.offset in
         (* Now, we can populate the elems map *)
         let vars_list = seg.init in
         let map =
           List.fold_left (fun (i, acc) var ->
-            let func = Int32Map.find var.it func_metadata_map in
+            let func = Int32Map.find var func_metadata_map in
             let new_elems = Int32Map.add i func acc in
             (Int32.(add i one), new_elems)) (Int32.zero, Int32Map.empty) vars_list |> snd in
         (offset, map) in
@@ -508,9 +522,9 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
 
     (* Next up, add all of the data definitions *)
     let data =
-      let open Libwasm.Ast in
+      let open Annotated in
       List.map (fun (data_seg: string segment) ->
-        let data_seg = data_seg.it in
+        let data_seg = data_seg in
         let offset = transform_i32_const data_seg.offset in
         { offset; contents = data_seg.init }) ast_mod.data in
 
@@ -526,8 +540,8 @@ let ir_module (ast_mod: Libwasm.Ast.module_) =
 
     (* Grab the start function, if one exists *)
     let start =
-        (Libwasm.Lib.Option.map (fun (v: Ast.var) ->
-          Int32Map.find (v.it) func_metadata_map)) ast_mod.start in
+        (Libwasm.Lib.Option.map (fun (v: Annotated.var) ->
+          Int32Map.find v func_metadata_map)) ast_mod.start in
 
     (* And for now, that should be it? *)
     { function_metadata = func_metadata_map;

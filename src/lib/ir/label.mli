@@ -12,10 +12,10 @@ module Id : sig
 end
 
 type t
-val create : arity:int -> needs_locals:bool -> t
+val create : arity:int -> local_ids:Annotated.var list -> t
 val create_return : arity:int -> t
 val id : t -> Id.t
 val arity : t -> int
-val needs_locals : t -> bool
+val local_ids : t -> Annotated.var list
 val to_sexpr : t -> Libwasm.Sexpr.sexpr
 val to_string : t -> string
