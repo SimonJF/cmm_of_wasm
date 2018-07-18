@@ -74,14 +74,13 @@ let export_func ~function_name func =
     ret_ty = ret; ir_func = func }
 
 let c_exports ~prefix (ir_mod: Ir.Stackless.module_) : c_export list  =
-  List.map (fun (x: Libwasm.Ast.export) ->
-    let x = x.it in
+  List.map (fun (x: Annotated.export) ->
     let export_name =
       Util.Names.(string_of_name x.name |> sanitise) in
 
-    match x.edesc.it with
+    match x.edesc with
       | FuncExport v ->
-          let md = Int32Map.find v.it ir_mod.function_metadata in
+          let md = Int32Map.find v ir_mod.function_metadata in
           let name = Printf.sprintf "%s_cfunc_%s" prefix export_name in
           export_func ~function_name:name md
       | TableExport _ ->
@@ -91,7 +90,7 @@ let c_exports ~prefix (ir_mod: Ir.Stackless.module_) : c_export list  =
           let name = Printf.sprintf "%s_memory_%s" prefix export_name in
           Cmemory { name }
       | GlobalExport v ->
-          let g = Int32Map.find v.it ir_mod.globals in
+          let g = Int32Map.find v ir_mod.globals in
           let cty = ctype_of_wasm_type (Global.type_ g) in
           let name = Printf.sprintf "%s_cglobal_%s" prefix export_name in
           let internal_name = Global.symbol ~module_name:prefix g in

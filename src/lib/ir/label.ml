@@ -29,29 +29,32 @@ end
 type t = {
   id : Id.t;
   arity: int;
-  needs_locals: bool;
+  local_ids: Annotated.var list
 }
 
-let create ~arity ~needs_locals = {
+let create ~arity ~local_ids = {
   id = Id.create();
   arity;
-  needs_locals;
+  local_ids;
 }
 
 let create_return ~arity = {
   id = Id.return;
   arity = arity;
-  needs_locals = false
+  local_ids = []
 }
 
 
 let id lbl = lbl.id
 let arity lbl = lbl.arity
-let needs_locals lbl = lbl.needs_locals
+let local_ids lbl = lbl.local_ids
 
 let to_string x =
-  Printf.sprintf "%s(%d):%s" (Id.to_string x.id) x.arity
-    (if x.needs_locals then "t" else "f")
+  let local_ids =
+    Printf.sprintf "[%s]"
+      (String.concat ","
+        (List.map (fun x -> string_of_int (Int32.to_int x)) x.local_ids)) in
+  Printf.sprintf "%s(%d):%s" (Id.to_string x.id) x.arity local_ids
 
 let to_sexpr x =
   Libwasm.Sexpr.Atom (to_string x)

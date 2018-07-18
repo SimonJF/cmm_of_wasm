@@ -30,9 +30,14 @@ let rec translate_instrs env generated (xs: Libwasm.Ast.instr list) =
         | Drop -> go Annotated.Drop
         | Select -> go Annotated.Select
         | Block (block_stack_ty, instrs) ->
+            (* Block: Translate the block with an empty environment,
+             * which gets us the translated block along with any mutated
+             * variables. *)
             let (block_generated, block_mutated_locals) =
               translate_instrs empty_env [] instrs in
             let new_env = merge_locals block_mutated_locals env in
+            let block_mutated_locals =
+              Int32Set.elements block_mutated_locals in
             let block = Annotated.Block {
               block_stack_ty;
               block_mutated_locals;
@@ -40,9 +45,12 @@ let rec translate_instrs env generated (xs: Libwasm.Ast.instr list) =
             } in
             translate_instrs new_env (block :: generated) xs
         | Loop (block_stack_ty, instrs) ->
+            (* Exactly the same as Block. *)
             let (block_generated, block_mutated_locals) =
               translate_instrs empty_env [] instrs in
             let new_env = merge_locals block_mutated_locals env in
+            let block_mutated_locals =
+              Int32Set.elements block_mutated_locals in
             let loop = Annotated.Loop {
               block_stack_ty;
               block_mutated_locals;
@@ -50,12 +58,15 @@ let rec translate_instrs env generated (xs: Libwasm.Ast.instr list) =
             } in
             translate_instrs new_env (loop :: generated) xs
         | If (conditional_stack_ty, t, f) ->
+            (* For If statements, we need to look at both true and false
+             * blocks, and merge the mutated locals set. *)
             let (gen_t, mutated_t) = translate_instrs empty_env [] t in
             let (gen_f, mutated_f) = translate_instrs empty_env [] f in
             let combined_mutated = Int32Set.union mutated_t mutated_f in
+            let combined_mutated_list = Int32Set.elements combined_mutated in
             let if_ = Annotated.If {
               conditional_stack_ty;
-              conditional_mutated_locals = combined_mutated;
+              conditional_mutated_locals = combined_mutated_list;
               conditional_true_instrs = gen_t;
               conditional_false_instrs = gen_f } in
             let new_env = merge_locals combined_mutated env in
@@ -69,11 +80,17 @@ let rec translate_instrs env generated (xs: Libwasm.Ast.instr list) =
         | Call v -> go (Annotated.Call (v.it))
         | CallIndirect v -> go (Annotated.CallIndirect (v.it))
         | GetLocal v -> go (Annotated.GetLocal (v.it))
+        (* SetLocal: Need to add local to modified set. *)
         | SetLocal v ->
             let v = v.it in
             let env = add_modified_local v env in
             translate_instrs env (Annotated.SetLocal v :: generated) xs
-        | TeeLocal v -> go (Annotated.TeeLocal (v.it))
+        (* Same for TeeLocal. *)
+        | TeeLocal v ->
+            let v = v.it in
+            let env = add_modified_local v env in
+            translate_instrs env (Annotated.TeeLocal v :: generated) xs
+        (* The rest of the instructions are boring. *)
         | GetGlobal v -> go (Annotated.GetGlobal (v.it))
         | SetGlobal v -> go (Annotated.SetGlobal (v.it))
         | Load lop -> go (Annotated.Load lop)

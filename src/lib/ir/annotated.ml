@@ -6,7 +6,6 @@
  * Used for generating efficient SSA. *)
 
 open Libwasm.Types
-open Util.Sets
 
 type var = int32
 type literal = Libwasm.Values.value
@@ -14,13 +13,13 @@ type name = int list
 
 type block_info = {
   block_stack_ty: stack_type;
-  block_mutated_locals: int32set;
+  block_mutated_locals: var list;
   block_instrs: instr list
 }
 
 and conditional_info = {
   conditional_stack_ty: stack_type;
-  conditional_mutated_locals: int32set;
+  conditional_mutated_locals: var list;
   conditional_true_instrs: instr list;
   conditional_false_instrs: instr list
 }

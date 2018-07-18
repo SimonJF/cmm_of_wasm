@@ -31,22 +31,22 @@ val set_stack : Var.t list -> t -> unit
 
 (* Control stack *)
 val push_label : Label.t -> t -> unit
-val nth_label : Libwasm.Ast.var -> t -> Label.t
+val nth_label : Annotated.var -> t -> Label.t
 (* Local variable store *)
-val set_local : Libwasm.Ast.var -> Var.t -> t -> unit
-val get_local : Libwasm.Ast.var -> t -> Var.t
+val set_local : Annotated.var -> Var.t -> t -> unit
+val get_local : Annotated.var -> t -> Var.t
 val locals : t -> Var.t list
 val set_locals : Var.t list -> t -> unit
 
 (* Globals *)
-val get_global : Libwasm.Ast.var -> t -> Global.t
+val get_global : Annotated.var -> t -> Global.t
 
 (* Functions *)
-val get_function : Libwasm.Ast.var -> t -> Func.t
+val get_function : Annotated.var -> t -> Func.t
 val set_continuation : Label.t -> t -> unit
 
 (* Types *)
-val get_type : Libwasm.Ast.var -> t -> Libwasm.Types.func_type
+val get_type : Annotated.var -> t -> Libwasm.Types.func_type
 
 (* Debugging *)
 val dump_stack : t -> unit

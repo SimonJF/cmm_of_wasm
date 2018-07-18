@@ -1,3 +1,5 @@
+(* Second IR: CPS-like IR without a stack, where local variables are in
+ * SSA form. *)
 open Libwasm.Ast
 open Libwasm.Types
 
@@ -80,7 +82,7 @@ type module_ = {
     function_ir: func Util.Maps.Int32Map.t;
     globals: Global.t Util.Maps.Int32Map.t;
     start : Func.t option;
-    exports : Libwasm.Ast.export list;
+    exports : Annotated.export list;
     memory_metadata: memory option;
     data : data list;
     table: table option;
