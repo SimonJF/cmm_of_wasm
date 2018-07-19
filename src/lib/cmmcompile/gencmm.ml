@@ -2,6 +2,7 @@
 open Ir
 open Cmm
 open Cmm_trap
+open Cmm_utils
 open Util.Maps
 
 (* Record type to hold information about exports *)
@@ -35,9 +36,21 @@ let u32_max = Nativeint.of_string "0x00000000FFFFFFFF"
 let u64_max = Nativeint.of_string "0xFFFFFFFFFFFFFFFF"
 
 let sign_extend_i32 n =
-  Cop(Casr, [Cop(Clsl, [n; Cconst_int 32], nodbg); Cconst_int 32], nodbg)
+  match n with
+    | Cconst_int n ->
+        Cconst_natint
+          Nativeint.(shift_right (shift_left (of_int n) 32) 32)
+    | Cconst_natint n ->
+        Cconst_natint
+          Nativeint.(shift_right (shift_left n 32) 32)
+    | _ -> Cop(Casr, [Cop(Clsl, [n; Cconst_int 32], nodbg);
+               Cconst_int 32], nodbg)
 
-let unset_high_32 n = Cop(Cand, [n; Cconst_natint u32_max], nodbg)
+let unset_high_32 n =
+  match n with
+    | Cconst_int n -> Cconst_natint Nativeint.(logand (of_int n) u32_max)
+    | Cconst_natint n -> Cconst_natint (Nativeint.logand n u32_max)
+    | _ -> Cop(Cand, [n; Cconst_natint u32_max], nodbg)
 
 let f32_of_f64 x = Cop (Cf32off64, [x], nodbg)
 let f64_of_f32 x = Cop (Cf64off32, [x], nodbg)
@@ -93,8 +106,11 @@ let compile_value =
   | F64 x -> Cconst_float (Libwasm.F64.to_float x)
 
 
-let compile_op_simple env cmmop v1 v2 =
-  match (cmmop, rv env v1, rv env v2) with
+(* This big ol' table is made uglier since integers may be either
+ * ints or nativeints. I wonder whether standardising everything to
+ * be nativeints would be an idea? *)
+let compile_op_simple cmmop e1 e2 =
+  match (cmmop, e1, e2) with
     (* Statically-resolvable integer addition *)
     | (Caddi, Cconst_int i1, Cconst_int i2) ->
         Cconst_natint (Nativeint.(add (of_int i1) (of_int i2)))
@@ -134,6 +150,49 @@ let compile_op_simple env cmmop v1 v2 =
     | (Cmuli, _, Cconst_int 0) -> Cconst_int 0
     (* Integer division requires normalisation and is generally
      * trickier, so not doing that just yet. *)
+    (* Bitwise and *)
+    | (Cand, Cconst_int i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(logand (of_int i1) (of_int i2)))
+    | (Cand, Cconst_int i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logand (of_int i1) i2))
+    | (Cand, Cconst_natint i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(logand i1 (of_int i2)))
+    | (Cand, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logand i1 i2))
+    | (Cand, Cconst_natint 0n, _) -> Cconst_natint 0n
+    | (Cand, _, Cconst_natint 0n) -> Cconst_natint 0n
+    | (Cand, Cconst_int 0, _) -> Cconst_int 0
+    | (Cand, _, Cconst_int 0) -> Cconst_int 0
+    (* Bitwise or *)
+    | (Cor, Cconst_int i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(logor (of_int i1) (of_int i2)))
+    | (Cor, Cconst_int i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logor (of_int i1) i2))
+    | (Cor, Cconst_natint i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(logor i1 (of_int i2)))
+    | (Cor, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logor i1 i2))
+    | (Cor, Cconst_natint i1, e2) ->
+        let all_set = (Nativeint.of_string "0xFFFFFFFFFFFFFFFF") in
+        if i1 = 0n then e2
+        else if i1 = all_set then Cconst_natint all_set
+        else (Cop (Cor, [Cconst_natint i1; e2], nodbg))
+    | (Cor, e1, Cconst_natint i2) ->
+        let all_set = (Nativeint.of_string "0xFFFFFFFFFFFFFFFF") in
+        if i2 = 0n then e2
+        else if i2 = all_set then Cconst_natint all_set
+        else (Cop (Cor, [e1; Cconst_natint i2], nodbg))
+    | (Cor, Cconst_int 0, e2) -> e2
+    | (Cor, e1, Cconst_int 0) -> e1
+    (* Bitwise xor *)
+    | (Cxor, Cconst_int i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(logxor (of_int i1) (of_int i2)))
+    | (Cxor, Cconst_int i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logxor (of_int i1) i2))
+    | (Cxor, Cconst_natint i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(logxor i1 (of_int i2)))
+    | (Cxor, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logxor i1 i2))
     (* Float 64 operations (f32s are handled by another function,
      * so don't need to faff with them here. *)
     (* The WASM spec forbids zero folding, so we don't do it. *)
@@ -161,11 +220,10 @@ let compile_op_normalised signed env op v1 v2 =
   let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
   let _ = assert (v1ty = v2ty) in
   let (e1, e2) = (rv env v1, rv env v2) in
-  let compile_op arg1 arg2 = Cop (op, [arg1; arg2], nodbg) in
   match v1ty with
     | I32Type ->
-        compile_op (normalise v1ty e1) (normalise v2ty e2)
-    | _ -> compile_op e1 e2
+        compile_op_simple op (normalise v1ty e1) (normalise v2ty e2)
+    | _ -> compile_op_simple op e1 e2
 
 let compile_relop env op v1 v2 =
   let open Libwasm.Values in
@@ -362,7 +420,7 @@ let compile_binop env op v1 v2 =
   let rotate_left = if is_32 then rotate_left_i32 else rotate_left_i64 in
   let rotate_right = if is_32 then rotate_right_i32 else rotate_right_i64 in
 
-  let cs op = compile_op_simple env op v1 v2 in
+  let cs op = compile_op_simple op (rv env v1) (rv env v2) in
   let cf32 op = compile_f32_op env op v1 v2 in
   (* let cn op signed = compile_op_normalised signed env op v1 v2 in *)
 
@@ -700,11 +758,6 @@ let compile_expression env =
       compile_binop env bin v1 v2
   | Convert (cvt, v) ->
       compile_cvtop env cvt v
-
-let is_value = function
-  | Cconst_int _ | Cconst_natint _ | Cconst_float _ | Cconst_symbol _
-  | Cconst_pointer _ | Cconst_natpointer _ | Cvar _ -> true
-  | _ -> false
 
 let compile_terminator env =
   let open Stackless in
