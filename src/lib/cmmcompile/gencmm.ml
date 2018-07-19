@@ -106,70 +106,37 @@ let compile_value =
   | F64 x -> Cconst_float (Libwasm.F64.to_float x)
 
 
-(* This big ol' table is made uglier since integers may be either
- * ints or nativeints. I wonder whether standardising everything to
- * be nativeints would be an idea? *)
 let compile_op_simple cmmop e1 e2 =
-  match (cmmop, e1, e2) with
+  (* If either argument is a Cconst_int, make it a Cconst_natint *)
+  let to_natint x =
+    match x with
+      | Cconst_int y -> Cconst_natint (Nativeint.of_int y)
+      | x -> x in
+  let e1_nat = to_natint e1 in
+  let e2_nat = to_natint e2 in
+  match (cmmop, e1_nat, e2_nat) with
     (* Statically-resolvable integer addition *)
-    | (Caddi, Cconst_int i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(add (of_int i1) (of_int i2)))
-    | (Caddi, Cconst_int i1, Cconst_natint i2) ->
-        Cconst_natint (Nativeint.(add (of_int i1) i2))
-    | (Caddi, Cconst_natint i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(add i1 (of_int i2)))
     | (Caddi, Cconst_natint i1, Cconst_natint i2) ->
         Cconst_natint (Nativeint.(add i1 i2))
     | (Caddi, Cconst_natint 0n, e2) -> e2
     | (Caddi, e1, Cconst_natint 0n) -> e1
-    | (Caddi, Cconst_int 0, e2) -> e2
-    | (Caddi, e1, Cconst_int 0) -> e1
     (* Statically-resolvable integer subtraction *)
-    | (Csubi, Cconst_int i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(sub (of_int i1) (of_int i2)))
-    | (Csubi, Cconst_int i1, Cconst_natint i2) ->
-        Cconst_natint (Nativeint.(sub (of_int i1) i2))
-    | (Csubi, Cconst_natint i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(sub i1 (of_int i2)))
     | (Csubi, Cconst_natint i1, Cconst_natint i2) ->
         Cconst_natint (Nativeint.(sub i1 i2))
     | (Csubi, e1, Cconst_natint 0n) -> e1
-    | (Csubi, e1, Cconst_int 0) -> e1
     (* Statically-resolvable integer multiplication *)
-    | (Cmuli, Cconst_int i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(mul (of_int i1) (of_int i2)))
-    | (Cmuli, Cconst_int i1, Cconst_natint i2) ->
-        Cconst_natint (Nativeint.(mul (of_int i1) i2))
-    | (Cmuli, Cconst_natint i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(mul i1 (of_int i2)))
     | (Cmuli, Cconst_natint i1, Cconst_natint i2) ->
         Cconst_natint (Nativeint.(mul i1 i2))
     | (Cmuli, Cconst_natint (0n), _) -> Cconst_natint (0n)
     | (Cmuli, _, Cconst_natint 0n) -> Cconst_natint 0n
-    | (Cmuli, Cconst_int 0, _) -> Cconst_int 0
-    | (Cmuli, _, Cconst_int 0) -> Cconst_int 0
     (* Integer division requires normalisation and is generally
      * trickier, so not doing that just yet. *)
     (* Bitwise and *)
-    | (Cand, Cconst_int i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(logand (of_int i1) (of_int i2)))
-    | (Cand, Cconst_int i1, Cconst_natint i2) ->
-        Cconst_natint (Nativeint.(logand (of_int i1) i2))
-    | (Cand, Cconst_natint i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(logand i1 (of_int i2)))
     | (Cand, Cconst_natint i1, Cconst_natint i2) ->
         Cconst_natint (Nativeint.(logand i1 i2))
     | (Cand, Cconst_natint 0n, _) -> Cconst_natint 0n
     | (Cand, _, Cconst_natint 0n) -> Cconst_natint 0n
-    | (Cand, Cconst_int 0, _) -> Cconst_int 0
-    | (Cand, _, Cconst_int 0) -> Cconst_int 0
     (* Bitwise or *)
-    | (Cor, Cconst_int i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(logor (of_int i1) (of_int i2)))
-    | (Cor, Cconst_int i1, Cconst_natint i2) ->
-        Cconst_natint (Nativeint.(logor (of_int i1) i2))
-    | (Cor, Cconst_natint i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(logor i1 (of_int i2)))
     | (Cor, Cconst_natint i1, Cconst_natint i2) ->
         Cconst_natint (Nativeint.(logor i1 i2))
     | (Cor, Cconst_natint i1, e2) ->
@@ -182,17 +149,26 @@ let compile_op_simple cmmop e1 e2 =
         if i2 = 0n then e2
         else if i2 = all_set then Cconst_natint all_set
         else (Cop (Cor, [e1; Cconst_natint i2], nodbg))
-    | (Cor, Cconst_int 0, e2) -> e2
-    | (Cor, e1, Cconst_int 0) -> e1
     (* Bitwise xor *)
-    | (Cxor, Cconst_int i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(logxor (of_int i1) (of_int i2)))
-    | (Cxor, Cconst_int i1, Cconst_natint i2) ->
-        Cconst_natint (Nativeint.(logxor (of_int i1) i2))
-    | (Cxor, Cconst_natint i1, Cconst_int i2) ->
-        Cconst_natint (Nativeint.(logxor i1 (of_int i2)))
     | (Cxor, Cconst_natint i1, Cconst_natint i2) ->
         Cconst_natint (Nativeint.(logxor i1 i2))
+    (* We can also do equality and _signed_ comparisons *)
+    (* TODO: Could we use something like the ocaml-integers
+     * package to allow us to do the unsigned comparisons? *)
+    | (Ccmpa Ceq, Cconst_natint i1, Cconst_natint i2)
+    | (Ccmpi Ceq, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 = i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpa Cne, Cconst_natint i1, Cconst_natint i2)
+    | (Ccmpi Cne, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 <> i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Clt, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 < i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Cle, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 <= i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Cgt, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 > i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Cge, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 >= i2 then Cconst_int 1 else Cconst_int 0
     (* Float 64 operations (f32s are handled by another function,
      * so don't need to faff with them here. *)
     (* The WASM spec forbids zero folding, so we don't do it. *)
@@ -205,7 +181,7 @@ let compile_op_simple cmmop e1 e2 =
     (* I guess we *might* be able to do float division... *)
     | (Cdivf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 /. f2)
     (* Otherwise, compile the operation as normal *)
-    | (cmmop, e1, e2) -> Cop (cmmop, [e1; e2], nodbg)
+    | (cmmop, _, _) -> Cop (cmmop, [e1; e2], nodbg)
 
 let compile_f32_op env cmmop v1 v2 =
   let (e1, e2) = (rv env v1, rv env v2) in
