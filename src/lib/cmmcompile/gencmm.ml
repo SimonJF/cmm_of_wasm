@@ -1077,6 +1077,7 @@ let compile_function (ir_func: Stackless.func) func_md env =
   let body =
     compile_term env ir_func.body
     |> normalise_function ret_tys
+    |> Dce.perform_dce
     |> with_exhaustion_check
     |> Cmm_trap.with_toplevel_handler return_ty in
   (* Finally, we can put it all together... *)
