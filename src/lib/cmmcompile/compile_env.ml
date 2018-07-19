@@ -1,6 +1,7 @@
 type t = {
   var_env : (Ir.Var.t, Ident.t) Hashtbl.t;
   label_env : (Ir.Label.Id.t, int) Hashtbl.t;
+  const_env : (Ir.Var.t, Cmm.expression) Hashtbl.t;
   mutable label_count : int;
   module_name : string;
   memory: Ir.Stackless.memory option;
@@ -9,8 +10,9 @@ type t = {
 }
 
 let create ~module_name ~memory ~table ~imported_function_count = {
-  var_env = Hashtbl.create 100;
-  label_env = Hashtbl.create 20;
+  var_env = Hashtbl.create 200;
+  label_env = Hashtbl.create 100;
+  const_env = Hashtbl.create 200;
   label_count = 0;
   module_name;
   memory;
@@ -52,4 +54,13 @@ let memory_symbol env =
     | _ -> env.module_name ^ "_internalmemory"
 
 let imported_function_count env = env.imported_function_count
+
+let add_constant var const env = Hashtbl.replace env.const_env var const
+
+(* Tries to resolve a constant. If it's in the constant environment,
+ * then returns the cached constant. *)
+let resolve_variable ir_var env =
+  match Hashtbl.find_opt env.const_env ir_var with
+    | Some x -> x
+    | None -> Cvar (lookup_var ir_var env)
 
