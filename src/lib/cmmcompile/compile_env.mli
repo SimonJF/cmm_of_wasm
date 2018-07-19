@@ -19,3 +19,6 @@ val memory_symbol : t -> string
 val table_symbol : t -> string
 val func_symbol : Ir.Func.t -> t -> string
 val global_symbol : Ir.Global.t -> t -> string
+
+val add_constant : Ir.Var.t -> Cmm.expression -> t -> unit
+val resolve_variable : Ir.Var.t -> t -> Cmm.expression

@@ -2,6 +2,7 @@
 open Ir
 open Cmm
 open Cmm_trap
+open Cmm_utils
 open Util.Maps
 
 (* Record type to hold information about exports *)
@@ -13,7 +14,8 @@ type export_info = {
 }
 
 (* Environment access helper functions *)
-let lv env x = Compile_env.lookup_var x env
+(* rv: resolve variable *)
+let rv env x = Compile_env.resolve_variable x env
 
 let ll env lbl = Compile_env.lookup_label lbl env
 let llb env br = ll env (Branch.label br)
@@ -34,9 +36,21 @@ let u32_max = Nativeint.of_string "0x00000000FFFFFFFF"
 let u64_max = Nativeint.of_string "0xFFFFFFFFFFFFFFFF"
 
 let sign_extend_i32 n =
-  Cop(Casr, [Cop(Clsl, [n; Cconst_int 32], nodbg); Cconst_int 32], nodbg)
+  match n with
+    | Cconst_int n ->
+        Cconst_natint
+          Nativeint.(shift_right (shift_left (of_int n) 32) 32)
+    | Cconst_natint n ->
+        Cconst_natint
+          Nativeint.(shift_right (shift_left n 32) 32)
+    | _ -> Cop(Casr, [Cop(Clsl, [n; Cconst_int 32], nodbg);
+               Cconst_int 32], nodbg)
 
-let unset_high_32 n = Cop(Cand, [n; Cconst_natint u32_max], nodbg)
+let unset_high_32 n =
+  match n with
+    | Cconst_int n -> Cconst_natint Nativeint.(logand (of_int n) u32_max)
+    | Cconst_natint n -> Cconst_natint (Nativeint.logand n u32_max)
+    | _ -> Cop(Cand, [n; Cconst_natint u32_max], nodbg)
 
 let f32_of_f64 x = Cop (Cf32off64, [x], nodbg)
 let f64_of_f32 x = Cop (Cf64off32, [x], nodbg)
@@ -92,13 +106,85 @@ let compile_value =
   | F64 x -> Cconst_float (Libwasm.F64.to_float x)
 
 
-let compile_op_simple env cmmop v1 v2 =
-  let (i1, i2) = (lv env v1, lv env v2) in
-  Cop (cmmop, [Cvar i1; Cvar i2], nodbg)
+let compile_op_simple cmmop e1 e2 =
+  (* If either argument is a Cconst_int, make it a Cconst_natint *)
+  let to_natint x =
+    match x with
+      | Cconst_int y -> Cconst_natint (Nativeint.of_int y)
+      | x -> x in
+  let e1_nat = to_natint e1 in
+  let e2_nat = to_natint e2 in
+  match (cmmop, e1_nat, e2_nat) with
+    (* Statically-resolvable integer addition *)
+    | (Caddi, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(add i1 i2))
+    | (Caddi, Cconst_natint 0n, e2) -> e2
+    | (Caddi, e1, Cconst_natint 0n) -> e1
+    (* Statically-resolvable integer subtraction *)
+    | (Csubi, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(sub i1 i2))
+    | (Csubi, e1, Cconst_natint 0n) -> e1
+    (* Statically-resolvable integer multiplication *)
+    | (Cmuli, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(mul i1 i2))
+    | (Cmuli, Cconst_natint (0n), _) -> Cconst_natint (0n)
+    | (Cmuli, _, Cconst_natint 0n) -> Cconst_natint 0n
+    (* Integer division handled elsewhere *)
+    (* Bitwise and *)
+    | (Cand, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logand i1 i2))
+    | (Cand, Cconst_natint 0n, _) -> Cconst_natint 0n
+    | (Cand, _, Cconst_natint 0n) -> Cconst_natint 0n
+    (* Bitwise or *)
+    | (Cor, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logor i1 i2))
+    | (Cor, Cconst_natint i1, e2) ->
+        let all_set = (Nativeint.of_string "0xFFFFFFFFFFFFFFFF") in
+        if i1 = 0n then e2
+        else if i1 = all_set then Cconst_natint all_set
+        else (Cop (Cor, [Cconst_natint i1; e2], nodbg))
+    | (Cor, e1, Cconst_natint i2) ->
+        let all_set = (Nativeint.of_string "0xFFFFFFFFFFFFFFFF") in
+        if i2 = 0n then e2
+        else if i2 = all_set then Cconst_natint all_set
+        else (Cop (Cor, [e1; Cconst_natint i2], nodbg))
+    (* Bitwise xor *)
+    | (Cxor, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(logxor i1 i2))
+    (* We can also do equality and _signed_ comparisons *)
+    (* TODO: Could we use something like the ocaml-integers
+     * package to allow us to do the unsigned comparisons? *)
+    | (Ccmpa Ceq, Cconst_natint i1, Cconst_natint i2)
+    | (Ccmpi Ceq, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 = i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpa Cne, Cconst_natint i1, Cconst_natint i2)
+    | (Ccmpi Cne, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 <> i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Clt, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 < i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Cle, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 <= i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Cgt, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 > i2 then Cconst_int 1 else Cconst_int 0
+    | (Ccmpi Cge, Cconst_natint i1, Cconst_natint i2) ->
+        if i1 >= i2 then Cconst_int 1 else Cconst_int 0
+    (* Float 64 operations (f32s are handled by another function,
+     * so don't need to faff with them here. *)
+    (* The WASM spec forbids zero folding, so we don't do it. *)
+    | (Caddf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 +. f2)
+    (* Float subtraction *)
+    | (Csubf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 -. f2)
+    (* Float multiplication. Can't specialise for 0, since we need
+     * to take NaNs into account. *)
+    | (Cmulf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 *. f2)
+    (* I guess we *might* be able to do float division... *)
+    | (Cdivf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 /. f2)
+    (* Otherwise, compile the operation as normal *)
+    | (cmmop, _, _) -> Cop (cmmop, [e1; e2], nodbg)
 
 let compile_f32_op env cmmop v1 v2 =
-  let (i1, i2) = (lv env v1, lv env v2) in
-  f32_of_f64 (Cop (cmmop, [f64_of_f32 (Cvar i1); f64_of_f32 (Cvar i2)], nodbg))
+  let (e1, e2) = (rv env v1, rv env v2) in
+  f32_of_f64 (Cop (cmmop, [f64_of_f32 e1; f64_of_f32 e2], nodbg))
 
 
 (* Some operations (division, modulo, comparison) require sign extension
@@ -108,22 +194,21 @@ let compile_op_normalised signed env op v1 v2 =
   let normalise = if signed then normalise_signed else normalise_unsigned in
   let (v1ty, v2ty) = (Var.type_ v1, Var.type_ v2) in
   let _ = assert (v1ty = v2ty) in
-  let (i1, i2) = (lv env v1, lv env v2) in
-  let compile_op arg1 arg2 = Cop (op, [arg1; arg2], nodbg) in
+  let (e1, e2) = (rv env v1, rv env v2) in
   match v1ty with
     | I32Type ->
-        compile_op (normalise v1ty (Cvar i1)) (normalise v2ty (Cvar i2))
-    | _ -> compile_op (Cvar i1) (Cvar i2)
+        compile_op_simple op (normalise v1ty e1) (normalise v2ty e2)
+    | _ -> compile_op_simple op e1 e2
 
 let compile_relop env op v1 v2 =
   let open Libwasm.Values in
 
   let cf op ~is_32 =
-    let (i1, i2) = (lv env v1, lv env v2) in
+    let (e1, e2) = (rv env v1, rv env v2) in
     if is_32 then
-      Cop (op, [f64_of_f32 @@ Cvar i1; f64_of_f32 @@ Cvar i2], nodbg)
+      Cop (op, [f64_of_f32 e1; f64_of_f32 e2], nodbg)
     else
-      Cop (op, [Cvar i1; Cvar i2], nodbg) in
+      Cop (op, [e1; e2], nodbg) in
 
   let cn op b = compile_op_normalised b env op v1 v2 in
 
@@ -158,7 +243,7 @@ let compile_relop env op v1 v2 =
 let compile_binop env op v1 v2 =
   let open Libwasm.Values in
   let is_32 = match Var.type_ v1 with | I32Type -> true | _ -> false in
-  let (i1, i2) = (lv env v1, lv env v2) in
+  let (e1, e2) = (rv env v1, rv env v2) in
 
   let division_operation normalise div_f =
     let ty = Var.type_ v2 in
@@ -167,40 +252,45 @@ let compile_binop env op v1 v2 =
           | I32Type -> Cconst_int 0
           | I64Type -> Cconst_natint Nativeint.zero
           | _ -> assert false in
-    let normal_i1 = normalise ty (Cvar i1) in
-    let normal_i2 = normalise ty (Cvar i2) in
-    let norm_i1 = Ident.create "_normi1" in
-    let norm_i2 = Ident.create "_normi2" in
-    Clet (norm_i1, normal_i1,
-      Clet (norm_i2, normal_i2,
+    let normal_e1 = normalise ty e1 in
+    let normal_e2 = normalise ty e2 in
+    let norm_e1_ident = Ident.create "_norme1" in
+    let norm_e2_ident = Ident.create "_norme2" in
+    Clet (norm_e1_ident, normal_e1,
+      Clet (norm_e2_ident, normal_e2,
         Cifthenelse (
-          Cop (Ccmpi Ceq, [Cvar norm_i2; cmp], nodbg),
+          Cop (Ccmpi Ceq, [Cvar norm_e2_ident; cmp], nodbg),
           trap TrapDivZero,
-          div_f norm_i1 norm_i2
+          div_f (Cvar norm_e1_ident) (Cvar norm_e2_ident)
         )
       )
     ) in
 
-  let div_overflow_check signed norm_i1 norm_i2 operation overflow =
-    let cmp_norm1 =
-      if is_32 then
-        Cconst_natint (Nativeint.of_string "0xFFFFFFFF80000000")
-      else
-        Cconst_natint (Nativeint.of_string "0x8000000000000000") in
-    let cmp_norm2, cmp_zero =
-      (Cconst_natint Nativeint.minus_one, Cconst_natint Nativeint.zero) in
+  let overflow_check_1 =
+    if is_32 then
+        Nativeint.of_string "0xFFFFFFFF80000000"
+    else
+        Nativeint.of_string "0x8000000000000000" in
+
+  let overflow_check_2 = Nativeint.minus_one in
+
+  let div_overflow_check signed norm_e1 norm_e2 operation overflow =
     if signed then
       Cifthenelse (
         Cop (Ccmpi Cne,
           [(Cop (Cand, [
-              Cop (Ccmpi Ceq, [Cvar norm_i1; cmp_norm1], nodbg);
-              Cop (Ccmpi Ceq, [Cvar norm_i2; cmp_norm2], nodbg)], nodbg));
-           cmp_zero], nodbg),
+              Cop (Ccmpi Ceq, [norm_e1; Cconst_natint overflow_check_1], nodbg);
+              Cop (Ccmpi Ceq, [norm_e2; Cconst_natint overflow_check_2], nodbg)], nodbg));
+           Cconst_natint 0n], nodbg),
         overflow,
         operation)
     else
       operation in
 
+  let to_natint x =
+    match x with
+      | Cconst_int y -> Cconst_natint (Nativeint.of_int y)
+      | x -> x in
 
   let divide signed =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
@@ -208,30 +298,49 @@ let compile_binop env op v1 v2 =
 
     division_operation
       norm_fn
-      (fun norm_i1 norm_i2 ->
-        let div = Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg) in
-        div_overflow_check signed norm_i1 norm_i2 div (trap TrapIntOverflow)) in
+      (fun norm_e1 norm_e2 ->
+        let nat_e1 = to_natint norm_e1 in
+        let nat_e2 = to_natint norm_e2 in
+        match nat_e1, nat_e2 with
+          | Cconst_natint i1, Cconst_natint i2 when signed ->
+              if i2 = 0n then trap TrapDivZero else
+              if i1 = overflow_check_1 && i2 = overflow_check_2 then
+                trap TrapIntOverflow else
+              Cconst_natint (Nativeint.div i1 i2)
+          | _ ->
+            let div = Cop (div_op, [norm_e1; norm_e2], nodbg) in
+            div_overflow_check
+              signed norm_e1 norm_e2 div (trap TrapIntOverflow)) in
 
   let rem signed =
     let norm_fn = if signed then normalise_signed else normalise_unsigned in
     let div_op = if signed then Cdivi else Cdiviu in
     division_operation
       norm_fn
-      (fun norm_i1 norm_i2 ->
+      (fun norm_e1 norm_e2 ->
+        let nat_e1 = to_natint norm_e1 in
+        let nat_e2 = to_natint norm_e2 in
+        match nat_e1, nat_e2 with
+          | Cconst_natint i1, Cconst_natint i2 when signed ->
+              if i2 = 0n then trap TrapDivZero else
+              if i1 = overflow_check_1 && i2 = overflow_check_2 then
+                trap TrapIntOverflow else
+              Cconst_natint (Nativeint.rem i1 i2)
+          | _ ->
         let op =
-          Cop (Csubi, [Cvar norm_i1;
+          Cop (Csubi, [norm_e1;
             Cop (Cmuli, [
-              Cop (div_op, [Cvar norm_i1; Cvar norm_i2], nodbg);
-              Cvar norm_i2], nodbg)], nodbg) in
-        div_overflow_check signed norm_i1 norm_i2 op (Cconst_int 0)) in
+              Cop (div_op, [norm_e1; norm_e2], nodbg);
+              norm_e2], nodbg)], nodbg) in
+        div_overflow_check signed norm_e1 norm_e2 op (Cconst_int 0)) in
 
   (* shift_left: need to normalise and mod RHS, but not LHS *)
   let shift_left =
     let ty = Var.type_ v1 in
-    (* Must normalise i2 and then get i2 % int width before doing the shift *)
-    let normalised_rhs = normalise_unsigned ty (Cvar i2) in
+    (* Must normalise e2 and then get e2 % int width before doing the shift *)
+    let normalised_rhs = normalise_unsigned ty e2 in
     let mod_base = if is_32 then Cconst_int 32 else Cconst_int 64 in
-    (Cop (Clsl, ([Cvar i1;
+    (Cop (Clsl, ([e1;
       Cop (Cmodi, [normalised_rhs; mod_base], nodbg)]), nodbg)) in
 
   (* shift_right: need to normalise LHS, and both normalise and mod RHS. *)
@@ -240,11 +349,11 @@ let compile_binop env op v1 v2 =
     (* Normalise LHS *)
     let normalised_lhs =
       if signed then
-        normalise_signed ty (Cvar i1)
+        normalise_signed ty e1
       else
-        normalise_unsigned ty (Cvar i1) in
-    (* Must normalise i2 and then get i2 % int width before doing the shift *)
-    let normalised_rhs = normalise_unsigned ty (Cvar i2) in
+        normalise_unsigned ty e1 in
+    (* Must normalise e2 and then get e2 % int width before doing the shift *)
+    let normalised_rhs = normalise_unsigned ty e2 in
     let mod_base = if is_32 then Cconst_int 32 else Cconst_int 64 in
     let op = if signed then Casr else Clsr in
     (Cop (op, ([normalised_lhs;
@@ -269,11 +378,11 @@ let compile_binop env op v1 v2 =
   let rotate_left_i32 =
     let width = 32 in
     let low_set_ident = Ident.create "rol32_low_set" in
-    let low_set = unset_high_32 (Cvar i1) in
+    let low_set = unset_high_32 e1 in
     (* Next, normalise rotate length *)
     let distance_ident = Ident.create "dist_id" in
     let distance =
-      Cop (Cmodi, [unset_high_32 (Cvar i2); Cconst_int width], nodbg) in
+      Cop (Cmodi, [unset_high_32 e2; Cconst_int width], nodbg) in
     Clet (low_set_ident, low_set,
       Clet (distance_ident, distance,
         rotate_left (Cvar low_set_ident) (Cvar distance_ident) width)) in
@@ -282,18 +391,18 @@ let compile_binop env op v1 v2 =
     let width = 64 in
     let distance_ident = Ident.create "dist_id" in
     let distance =
-      Cop (Cmodi, [Cvar i2; Cconst_int 64], nodbg) in
+      Cop (Cmodi, [e2; Cconst_int 64], nodbg) in
     Clet (distance_ident, distance,
-      rotate_left (Cvar i1) (Cvar distance_ident) width) in
+      rotate_left e1 (Cvar distance_ident) width) in
 
     let rotate_right_i32 =
     let width = 32 in
     let low_set_ident = Ident.create "ror32_low_set" in
-    let low_set = unset_high_32 (Cvar i1) in
+    let low_set = unset_high_32 e1 in
     (* Next, normalise rotate length *)
     let distance_ident = Ident.create "dist_id" in
     let distance =
-      Cop (Cmodi, [unset_high_32 (Cvar i2); Cconst_int 32], nodbg) in
+      Cop (Cmodi, [unset_high_32 e2; Cconst_int 32], nodbg) in
     Clet (low_set_ident, low_set,
       Clet (distance_ident, distance,
         rotate_right (Cvar low_set_ident) (Cvar distance_ident) width)) in
@@ -302,20 +411,20 @@ let compile_binop env op v1 v2 =
     let width = 64 in
     let distance_ident = Ident.create "dist_id" in
     let distance =
-      Cop (Cmodi, [Cvar i2; Cconst_int width], nodbg) in
+      Cop (Cmodi, [e2; Cconst_int width], nodbg) in
     Clet (distance_ident, distance,
-      rotate_right (Cvar i1) (Cvar distance_ident) width) in
+      rotate_right e1 (Cvar distance_ident) width) in
 
 
   let rotate_left = if is_32 then rotate_left_i32 else rotate_left_i64 in
   let rotate_right = if is_32 then rotate_right_i32 else rotate_right_i64 in
 
-  let cs op = compile_op_simple env op v1 v2 in
+  let cs op = compile_op_simple op (rv env v1) (rv env v2) in
   let cf32 op = compile_f32_op env op v1 v2 in
   (* let cn op signed = compile_op_normalised signed env op v1 v2 in *)
 
   let min_or_max ~is_f32 ~is_min =
-    let (i1, i2) = (lv env v1, lv env v2) in
+    let (e1, e2) = (rv env v1, rv env v2) in
     let op = if is_min then CFle else CFge in
     let (arg_f, result_f) =
       if is_f32 then (f64_of_f32, f32_of_f64)
@@ -339,22 +448,22 @@ let compile_binop env op v1 v2 =
     (* Check if both are zeros *)
     (* Check NaN special case *)
     Cifthenelse (
-      Cop (Cor, [is_nan (arg_f @@ Cvar i1); is_nan (arg_f @@ Cvar i2)], nodbg),
+      Cop (Cor, [is_nan (arg_f e1); is_nan (arg_f e2)], nodbg),
       wasm_nan,
       Cifthenelse (
-        Cop (Cand, [float_eq_zero (arg_f @@ Cvar i1); float_eq_zero (arg_f @@ Cvar i2)], nodbg),
+        Cop (Cand, [float_eq_zero (arg_f e1); float_eq_zero (arg_f e2)], nodbg),
         (* TODO: I really can't do better than this at the moment. The WASM spec requires
          * us to check the sign bit properly when comparing zeros, and there's no easy way
          * to do so from CMM that I can see. *)
         begin
           let call name =
             Cop (Cextcall (name, typ_float, false, None),
-                [Cvar i1; Cvar i2], nodbg) in
+                [e1; e2], nodbg) in
            if is_min then call zero_min_f else call zero_max_f
         end,
         Cifthenelse (
-            Cop (Ccmpf op, [arg_f @@ Cvar i1; arg_f @@ Cvar i2], nodbg),
-            Cvar i1, Cvar i2))) in
+            Cop (Ccmpf op, [arg_f e1; arg_f e2], nodbg),
+            e1, e2))) in
 
   let compile_int_op =
     let open Libwasm.Ast.IntOp in
@@ -385,7 +494,7 @@ let compile_binop env op v1 v2 =
     | Max -> min_or_max ~is_f32:false ~is_min:false
     | CopySign ->
         Cop (Cextcall ("copysign", typ_float, false, None),
-          [Cvar i1; Cvar i2], nodbg) in
+          [e1; e2], nodbg) in
   let compile_float32_op =
     let open Libwasm.Ast.FloatOp in
     function
@@ -397,7 +506,7 @@ let compile_binop env op v1 v2 =
     | Max -> min_or_max ~is_f32:true ~is_min:false
     | CopySign ->
         Cop (Cextcall ("copysignf", typ_float, false, None),
-          [Cvar i1; Cvar i2], nodbg) in
+          [e1; e2], nodbg) in
   match op with
     | I32 i32op -> compile_int_op i32op
     | I64 i64op -> compile_int_op i64op
@@ -409,7 +518,7 @@ let compile_unop env op v =
 
   let compile_int_op ~is_32 =
     let open Libwasm.Ast.IntOp in
-    let arg = Cvar (lv env v) in
+    let arg = rv env v in
     let add_suffix s = s ^ (if is_32 then "_u32" else "_u64") in
     let call name = Cextcall (add_suffix name, typ_int, false, None) in
     function
@@ -420,31 +529,65 @@ let compile_unop env op v =
   let compile_float_op ~is_32 =
     let open Libwasm.Ast.FloatOp in
 
-    let i = lv env v in
+    let e = rv env v in
     let call name =
-      Cop (Cextcall (name, typ_float, false, None), [Cvar i], nodbg) in
+      Cop (Cextcall (name, typ_float, false, None), [e], nodbg) in
 
     let call_floats f32_name f64_name =
       if is_32 then call f32_name
       else call f64_name in
 
     function
-      (* Unfortunately, in 32-bit mode, we need to do an RTS call since
-       * the cast-to-64-bit trick loses information when combined with
-       * neg and abs, it seems. Nonsense to do with NaNs. *)
       | Neg ->
           if is_32 then call "wasm_rt_neg_f32"
-          else Cop (Cnegf, [Cvar i], nodbg)
+          else
+            begin
+              match e with
+                | Cconst_float f -> Cconst_float (~-. f)
+                | _ -> Cop (Cnegf, [e], nodbg)
+            end
       | Abs ->
           if is_32 then call "fabsf"
-          else Cop (Cabsf, [Cvar i], nodbg)
+          else
+            begin
+              match e with
+                | Cconst_float f -> Cconst_float (abs_float f)
+                | _ -> Cop (Cabsf, [e], nodbg)
+            end
       | Ceil ->
           if is_32 then call "ceilf"
-          else call "ceil"
-      | Floor -> call_floats "floorf" "floor"
-      | Trunc -> call_floats "truncf" "trunc"
+          else
+            begin
+              match e with
+                | Cconst_float f -> Cconst_float (ceil f)
+                | _ -> call "ceil"
+            end
+      | Floor ->
+          if is_32 then call "floorf"
+          else
+            begin
+              match e with
+                | Cconst_float f -> Cconst_float (floor f)
+                | _ -> call "floor"
+            end
+      | Trunc ->
+          if is_32 then call "truncf"
+          else
+            begin
+              match e with
+                | Cconst_float f ->
+                    Cconst_float (f |> truncate |> float_of_int)
+                | _ -> call "trunc"
+            end
       | Nearest -> call_floats "nearbyintf" "nearbyint"
-      | Sqrt -> call_floats "sqrtf" "sqrt" in
+      | Sqrt ->
+          if is_32 then call "sqrtf"
+          else
+            begin
+              match e with
+                | Cconst_float f -> Cconst_float (sqrt f)
+                | _ -> call "sqrt"
+            end in
 
   match op with
     | I32 i32op -> compile_int_op ~is_32:true i32op
@@ -454,7 +597,7 @@ let compile_unop env op v =
 
 let compile_cvtop env op v =
   let open Libwasm.Values in
-  let var = Cvar (lv env v) in
+  let arg = rv env v in
 
   let call_float name args =
     Cop (Cextcall (name, typ_float, false, None), args, nodbg) in
@@ -463,9 +606,15 @@ let compile_cvtop env op v =
     Cop (Cextcall (name, typ_int, false, None), args, nodbg) in
 
   let float_of_int x =
-    Cop (Cfloatofint, [x], nodbg) in
+    match x with
+      | Cconst_int x -> Cconst_float (float_of_int x)
+      | Cconst_natint x -> Cconst_float (Nativeint.to_float x)
+      | _ -> Cop (Cfloatofint, [x], nodbg) in
+
   let int_of_float x =
-    Cop (Cintoffloat, [x], nodbg) in
+    match x with
+      | Cconst_float f -> Cconst_natint (Nativeint.of_float f)
+      | _ -> Cop (Cintoffloat, [x], nodbg) in
 
   let compile_int_op ~is_32 =
 
@@ -494,7 +643,7 @@ let compile_cvtop env op v =
           (min, max) in
       (* If float is 32 bits, we need to first promote it to 64 bits *)
       let cmp =
-        if is_float_32 then f64_of_f32 var else var in
+        if is_float_32 then f64_of_f32 arg else arg in
       let max_op =
         if is_32 && (not is_float_32) then CFgt else CFge in
 
@@ -518,17 +667,17 @@ let compile_cvtop env op v =
       let cvt_from = if is_float_32 then "f32" else "f64" in
       let call_name = Printf.sprintf "wasm_rt_trunc_%s_%s" cvt_to cvt_from in
       Cop (Cextcall (call_name, typ_int, false, None),
-        [var], nodbg) in
+        [arg], nodbg) in
 
     let open Libwasm.Ast.IntOp in
     function
-      | ExtendSI32 -> sign_extend_i32 var
-      | ExtendUI32 -> unset_high_32 var
+      | ExtendSI32 -> sign_extend_i32 arg
+      | ExtendUI32 -> unset_high_32 arg
       | WrapI64 ->
           (* Amusingly, since we're emulating i32s using i64s
            * anyway, we actually don't need to do anything for
            * this case at all :) *)
-          var
+          arg
       | TruncSF32 -> truncate_signed_float true
       | TruncUF32 -> truncate_unsigned_float true
       | TruncSF64 -> truncate_signed_float false
@@ -538,14 +687,14 @@ let compile_cvtop env op v =
            * mechanism for copying between registers. For now, we can
            * emulate reinterpret operations using a memcpy in the RTS. *)
           let suffix = if is_32 then "_u32" else "_u64" in
-          call_int ("wasm_rt_reinterpret" ^ suffix) [var] in
+          call_int ("wasm_rt_reinterpret" ^ suffix) [arg] in
 
   let compile_float_op ~is_32 =
     let open Libwasm.Ast.FloatOp in
 
     let convert_unsigned_int is_int_32 =
       (* Again, we need to call the RTS to do these conversions :( *)
-      let cvt = if is_int_32 then unset_high_32 var else var in
+      let cvt = if is_int_32 then unset_high_32 arg else arg in
       let cvt_to = if is_32 then "f32" else "f64" in
       let cvt_from = if is_int_32 then "u32" else "u64" in
       let call_name = Printf.sprintf "wasm_rt_convert_%s_%s" cvt_to cvt_from in
@@ -553,18 +702,18 @@ let compile_cvtop env op v =
 
     function
       | ConvertSI32 ->
-          let cvt = float_of_int (sign_extend_i32 var) in
+          let cvt = float_of_int (sign_extend_i32 arg) in
           if is_32 then f32_of_f64 cvt else cvt
       | ConvertUI32 -> convert_unsigned_int true
       | ConvertSI64 ->
-          let cvt = float_of_int var in
+          let cvt = float_of_int arg in
           if is_32 then f32_of_f64 cvt else cvt
       | ConvertUI64 -> convert_unsigned_int false
-      | PromoteF32 -> f64_of_f32 var
-      | DemoteF64 -> f32_of_f64 var
+      | PromoteF32 -> f64_of_f32 arg
+      | DemoteF64 -> f32_of_f64 arg
       | ReinterpretInt ->
           let suffix = if is_32 then "_f32" else "_f64" in
-          call_float ("wasm_rt_reinterpret" ^ suffix) [var] in
+          call_float ("wasm_rt_reinterpret" ^ suffix) [arg] in
 
   match op with
     | I32 i32op -> compile_int_op ~is_32:true i32op
@@ -592,7 +741,13 @@ let compile_expression env =
   let open Ir.Stackless in
   function
   | Select { cond ; ifso ; ifnot } ->
-      Cifthenelse (Cvar (lv env cond), Cvar(lv env ifso), Cvar(lv env ifnot))
+      begin
+        let cond_expr = rv env cond in
+        match cond_expr with
+          | Cconst_int 0 | Cconst_natint 0n -> rv env ifnot
+          | Cconst_int _ | Cconst_natint _ -> rv env ifso
+          | _ -> Cifthenelse (cond_expr, rv env ifso, rv env ifnot)
+      end
   | GetGlobal g ->
       begin
         let load_global g =
@@ -621,25 +776,23 @@ let compile_expression env =
   | Load (loadop, v) ->
       Cmm_rts.Memory.load
         ~root:(Cconst_symbol (Compile_env.memory_symbol env))
-        ~dynamic_pointer:(unset_high_32 @@ Cvar (lv env v))
+        ~dynamic_pointer:(unset_high_32 @@ rv env v)
         ~op:loadop
   | MemorySize ->
       Cmm_rts.Memory.size (Cconst_symbol (Compile_env.memory_symbol env))
   | MemoryGrow v ->
       Cmm_rts.Memory.grow
         (Cconst_symbol (Compile_env.memory_symbol env))
-        (Cvar (lv env v))
+        (rv env v)
   | Const value -> compile_value value
   | Test (_test, v) ->
-      let i = lv env v in
-      let cmp =
-        let open Libwasm.Types in
-        match Var.type_ v with
-          | I32Type -> Cconst_int 0
-          | I64Type -> Cconst_natint Nativeint.zero
-          | _ -> failwith "Eqz not implemented on floats"
-        in
-      Cop (Ccmpi Ceq, [Cvar i; cmp], nodbg)
+      let arg = rv env v in
+      begin
+        match arg with
+          | Cconst_int 0 | Cconst_natint 0n -> Cconst_int 1
+          | Cconst_int _ | Cconst_natint _ -> Cconst_int 0
+          | _ -> Cop (Ccmpi Ceq, [arg; Cconst_int 0], nodbg)
+      end
   | Compare (rel, v1, v2) ->
       compile_relop env rel v1 v2
   | Unary (un, v) ->
@@ -654,8 +807,7 @@ let compile_terminator env =
   let branch b =
     let lbl_id = Branch.label b |> Label.id in
     let args =
-      List.map (fun v ->
-        Cvar (lv env v)) (Branch.arguments b) in
+      List.map (fun v -> rv env v) (Branch.arguments b) in
 
     if Label.Id.is_return lbl_id then
       begin
@@ -703,11 +855,11 @@ let compile_terminator env =
 
 
   let call fn_noreturn fn_return1 ret_tys args cont =
-      let args_cvars = (List.map (fun v -> Cvar (lv env v)) args) in
+      let args_cvars = (List.map (fun v -> rv env v) args) in
       let br_id = Compile_env.lookup_label (Branch.label cont) env in
       let branch_args = Branch.arguments cont in
       let cont_args_cvars =
-        (List.map (fun v -> Cvar (lv env v)) branch_args) in
+        (List.map (fun v -> rv env v) branch_args) in
       (* One return value: let-composition, result goes on head of args *)
       match ret_tys with
         | [] -> fn_noreturn args_cvars br_id cont_args_cvars
@@ -727,27 +879,34 @@ let compile_terminator env =
           |> Array.of_list in
         let switch_ids = Array.make (List.length branches) 0 in
         let () = Array.iteri (fun i _ -> switch_ids.(i) <- i) switch_ids in
-        let idx = lv env index in
+        let idx = unset_high_32 @@ rv env index in
 
         Clet (lbl_id,
           Cifthenelse (
             (* Test whether index exceeds bounds *)
             Cop (Ccmpa Cge,
-              [Cvar idx; Cconst_int (List.length es)], nodbg),
+              [idx; Cconst_int (List.length es)], nodbg),
             (* If so, return the default branch *)
             Cconst_int (default_id),
             (* Otherwise, return the index *)
-            Cvar idx),
+            idx),
             (* Implement br_table using Cswitch *)
             Cswitch (Cvar lbl_id, switch_ids, branches_exprs, nodbg))
     | If { cond; ifso; ifnot } ->
-        let cond_var = Cvar (lv env cond) in
-        let test =
-          Cop (Ccmpi Cne, [cond_var; Cconst_natint Nativeint.zero],
-            nodbg) in
+        let cond_arg = rv env cond in
         let true_branch = branch ifso in
         let false_branch = branch ifnot in
-        Cifthenelse (test, true_branch, false_branch)
+
+        begin
+        match cond_arg with
+          | Cconst_int 0 | Cconst_natint 0n -> false_branch
+          | Cconst_int _ | Cconst_natint _ -> true_branch
+          | _ ->
+            let test =
+              Cop (Ccmpi Cne, [cond_arg; Cconst_natint Nativeint.zero],
+                nodbg) in
+            Cifthenelse (test, true_branch, false_branch)
+        end
     | Call { func ; args; cont } ->
         let (FuncType (_arg_tys, ret_tys)) = Func.type_ func in
         let symb = Compile_env.func_symbol func env in
@@ -766,7 +925,7 @@ let compile_terminator env =
         (* Normalise function index *)
         let func_ident = Ident.create "func_id" in
         let func_var = Cvar func_ident in
-        let func = unset_high_32 (Cvar (lv env func)) in
+        let func = unset_high_32 (rv env func) in
         let FuncType (_arg_tys, ret_tys) = type_ in
 
         let in_bounds =
@@ -778,13 +937,6 @@ let compile_terminator env =
           let that_hash = Cmm_rts.Tables.function_hash env func in
           Cop (Ccmpa Ceq, [Cconst_natint this_hash; that_hash], nodbg) in
 
-        (* Since the number of imported functions is statically known,
-         * we may do a dynamic check to work out whether to call the
-         * imported function using the C calling conventions or the
-         * OCaml calling conventions.
-         *
-         * When we special case "env" and "spectest", this probably won't
-         * be necessary. *)
         let uses_c_ident = Ident.create "uses_c_conventions" in
         let uses_c_var = Cvar uses_c_ident in
 
@@ -861,25 +1013,33 @@ let rec compile_body env terminator = function
             let cont = compile_body env terminator xs in
             Ccatch (rec_flag, [catch_clause], cont)
         | Let (v, e) ->
-            let ident = bind_var v env in
-            let e1 = compile_expression env e in
-            Clet (ident, e1, compile_body env terminator xs)
+            (* Constant propagation *)
+            let cmm_e = compile_expression env e in
+            if is_value cmm_e then
+              let () = Compile_env.add_constant v cmm_e env in
+              compile_body env terminator xs
+            else
+              let ident = bind_var v env in
+              Clet (ident, cmm_e, compile_body env terminator xs)
         | Effect (SetGlobal (g, v)) ->
             let symbol = Cconst_symbol (Compile_env.global_symbol g env) in
+            let to_store = rv env v in
             Csequence (
               Cmm_rts.Globals.set
                 ~symbol
                 ~ty:(Global.type_ g)
-                ~to_store:(Cvar (lv env v)),
+                ~to_store,
               compile_body env terminator xs
             )
         | Effect (Store { op; index; value }) ->
+            let dynamic_pointer = unset_high_32 @@ rv env index in
+            let to_store = rv env value in
             Csequence (
               Cmm_rts.Memory.store
                 ~root:(Cconst_symbol (Compile_env.memory_symbol env))
-                ~dynamic_pointer:(unset_high_32 @@ Cvar (lv env index))
+                ~dynamic_pointer
                 ~op
-                ~to_store:(Cvar (lv env value)),
+                ~to_store,
             compile_body env terminator xs)
 
       end

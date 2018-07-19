@@ -2,6 +2,7 @@
  * written in CMM. Since they're CMM, they can be (and are) inlined. *)
 open Cmm
 open Cmm_trap
+open Cmm_utils
 
 type alignment = int
 type cmm_address = Cmm.expression
@@ -60,20 +61,35 @@ module Memory = struct
       addr
     else
       let normalised_offset =
-        Cconst_natint (Nativeint.logand offset
-          (Nativeint.of_string "0x00000000FFFFFFFF")) in
-      Cop (Cadda, [addr; normalised_offset], nodbg)
-
+        Nativeint.logand offset
+          (Nativeint.of_string "0x00000000FFFFFFFF") in
+      (* Specialise for constants *)
+      match addr with
+        | Cconst_int x ->
+            Cconst_natint (Nativeint.(add (of_int x) normalised_offset))
+        | Cconst_natint x ->
+            Cconst_natint (Nativeint.(add x normalised_offset))
+        | _ ->
+          Cop (Cadda, [addr; Cconst_natint normalised_offset], nodbg)
 
   let effective_address root offset =
     Cop (Caddi, [MemoryAccessors.data_pointer root; offset], nodbg)
 
-
   let with_mem_check ~root ~effective_offset ~chunk ~expr =
+    let offset =
+      if is_int effective_offset then
+        let static_offset =
+          match effective_offset with
+            | Cconst_int i -> Nativeint.of_int i
+            | Cconst_natint i -> i
+            | _ -> assert false in
+        Cconst_natint (Nativeint.(add static_offset (of_int @@ chunk_size chunk)))
+      else
+        Cop (Caddi, [effective_offset; Cconst_int (chunk_size chunk)], nodbg) in
+
     let out_of_bounds =
       Cop (Ccmpa Cgt,
-        [Cop (Caddi, [effective_offset; Cconst_int (chunk_size chunk)], nodbg);
-         MemoryAccessors.memory_size root], nodbg) in
+        [offset; MemoryAccessors.memory_size root], nodbg) in
 
     Cifthenelse (
       out_of_bounds,
@@ -117,23 +133,30 @@ module Memory = struct
     let eo = effective_offset dynamic_pointer static_offset in
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
-    let base_expr =
-      Cop (Cload (chunk, Mutable), [effective_address root eo_var], nodbg) in
-    let expr =
+
+    let expr eo =
+      let base_expr =
+        Cop (Cload (chunk, Mutable), [effective_address root eo], nodbg) in
       (* HACK: OCaml helpfully transforms a F32 into a F64 when
        * loading. This won't do, since WASM expects F32 store / loads
        * to be bit-preserving, so we have to emulate via a C call. *)
       if op.ty = F32Type then
         Cop (Cextcall ("wasm_rt_load_f32", typ_float, false, None),
-          [root; eo_var], nodbg)
+          [root; eo], nodbg)
       else base_expr in
 
-    Clet (eo_ident, eo,
+    if is_value eo then
       with_mem_check
         ~root
-        ~effective_offset:eo_var
-        ~chunk
-        ~expr)
+        ~effective_offset:eo
+        ~chunk ~expr:(expr eo)
+    else
+      Clet (eo_ident, eo,
+        with_mem_check
+          ~root
+          ~effective_offset:eo_var
+          ~chunk
+          ~expr:(expr eo_var))
 
   let store ~root ~dynamic_pointer ~(op:Libwasm.Ast.storeop) ~to_store =
     let open Libwasm.Types in
@@ -143,19 +166,26 @@ module Memory = struct
     let eo_ident = Ident.create "eo" in
     let eo_var = Cvar eo_ident in
     (* As above. *)
-    let expr =
+    let expr eo =
       if op.ty = F32Type then
         Cop (Cextcall ("wasm_rt_store_f32", typ_void, false, None),
-          [root; eo_var; to_store], nodbg)
+          [root; eo; to_store], nodbg)
       else
         Cop (Cstore (chunk, Assignment),
-        [effective_address root eo_var; to_store], nodbg) in
-    Clet (eo_ident, eo,
+        [effective_address root eo; to_store], nodbg) in
+
+    if is_value eo then
       with_mem_check
         ~root
-        ~effective_offset:eo_var
-        ~chunk
-        ~expr)
+        ~effective_offset:eo
+        ~chunk ~expr:(expr eo)
+    else
+      Clet (eo_ident, eo,
+        with_mem_check
+          ~root
+          ~effective_offset:eo_var
+          ~chunk
+          ~expr:(expr eo_var))
 
   let grow root pages =
     (* I *think* it's safe to put false as allocation flag here, since
