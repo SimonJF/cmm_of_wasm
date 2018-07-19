@@ -94,8 +94,59 @@ let compile_value =
 
 
 let compile_op_simple env cmmop v1 v2 =
-  let (e1, e2) = (rv env v1, rv env v2) in
-  Cop (cmmop, [e1; e2], nodbg)
+  match (cmmop, rv env v1, rv env v2) with
+    (* Statically-resolvable integer addition *)
+    | (Caddi, Cconst_int i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(add (of_int i1) (of_int i2)))
+    | (Caddi, Cconst_int i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(add (of_int i1) i2))
+    | (Caddi, Cconst_natint i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(add i1 (of_int i2)))
+    | (Caddi, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(add i1 i2))
+    | (Caddi, Cconst_natint 0n, e2) -> e2
+    | (Caddi, e1, Cconst_natint 0n) -> e1
+    | (Caddi, Cconst_int 0, e2) -> e2
+    | (Caddi, e1, Cconst_int 0) -> e1
+    (* Statically-resolvable integer subtraction *)
+    | (Csubi, Cconst_int i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(sub (of_int i1) (of_int i2)))
+    | (Csubi, Cconst_int i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(sub (of_int i1) i2))
+    | (Csubi, Cconst_natint i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(sub i1 (of_int i2)))
+    | (Csubi, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(sub i1 i2))
+    | (Csubi, e1, Cconst_natint 0n) -> e1
+    | (Csubi, e1, Cconst_int 0) -> e1
+    (* Statically-resolvable integer multiplication *)
+    | (Cmuli, Cconst_int i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(mul (of_int i1) (of_int i2)))
+    | (Cmuli, Cconst_int i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(mul (of_int i1) i2))
+    | (Cmuli, Cconst_natint i1, Cconst_int i2) ->
+        Cconst_natint (Nativeint.(mul i1 (of_int i2)))
+    | (Cmuli, Cconst_natint i1, Cconst_natint i2) ->
+        Cconst_natint (Nativeint.(mul i1 i2))
+    | (Cmuli, Cconst_natint (0n), _) -> Cconst_natint (0n)
+    | (Cmuli, _, Cconst_natint 0n) -> Cconst_natint 0n
+    | (Cmuli, Cconst_int 0, _) -> Cconst_int 0
+    | (Cmuli, _, Cconst_int 0) -> Cconst_int 0
+    (* Integer division requires normalisation and is generally
+     * trickier, so not doing that just yet. *)
+    (* Float 64 operations (f32s are handled by another function,
+     * so don't need to faff with them here. *)
+    (* The WASM spec forbids zero folding, so we don't do it. *)
+    | (Caddf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 +. f2)
+    (* Float subtraction *)
+    | (Csubf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 -. f2)
+    (* Float multiplication. Can't specialise for 0, since we need
+     * to take NaNs into account. *)
+    | (Cmulf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 *. f2)
+    (* I guess we *might* be able to do float division... *)
+    | (Cdivf, Cconst_float f1, Cconst_float f2) -> Cconst_float (f1 /. f2)
+    (* Otherwise, compile the operation as normal *)
+    | (cmmop, e1, e2) -> Cop (cmmop, [e1; e2], nodbg)
 
 let compile_f32_op env cmmop v1 v2 =
   let (e1, e2) = (rv env v1, rv env v2) in
@@ -650,9 +701,9 @@ let compile_expression env =
   | Convert (cvt, v) ->
       compile_cvtop env cvt v
 
-let is_constant_expression = function
+let is_value = function
   | Cconst_int _ | Cconst_natint _ | Cconst_float _ | Cconst_symbol _
-  | Cconst_pointer _ | Cconst_natpointer _ -> true
+  | Cconst_pointer _ | Cconst_natpointer _ | Cvar _ -> true
   | _ -> false
 
 let compile_terminator env =
@@ -868,7 +919,7 @@ let rec compile_body env terminator = function
         | Let (v, e) ->
             (* Constant propagation *)
             let cmm_e = compile_expression env e in
-            if is_constant_expression cmm_e then
+            if is_value cmm_e then
               let () = Compile_env.add_constant v cmm_e env in
               compile_body env terminator xs
             else
