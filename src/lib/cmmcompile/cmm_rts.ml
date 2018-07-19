@@ -76,10 +76,20 @@ module Memory = struct
     Cop (Caddi, [MemoryAccessors.data_pointer root; offset], nodbg)
 
   let with_mem_check ~root ~effective_offset ~chunk ~expr =
+    let offset =
+      if is_int effective_offset then
+        let static_offset =
+          match effective_offset with
+            | Cconst_int i -> Nativeint.of_int i
+            | Cconst_natint i -> i
+            | _ -> assert false in
+        Cconst_natint (Nativeint.(add static_offset (of_int @@ chunk_size chunk)))
+      else
+        Cop (Caddi, [effective_offset; Cconst_int (chunk_size chunk)], nodbg) in
+
     let out_of_bounds =
       Cop (Ccmpa Cgt,
-        [Cop (Caddi, [effective_offset; Cconst_int (chunk_size chunk)], nodbg);
-         MemoryAccessors.memory_size root], nodbg) in
+        [offset; MemoryAccessors.memory_size root], nodbg) in
 
     Cifthenelse (
       out_of_bounds,
