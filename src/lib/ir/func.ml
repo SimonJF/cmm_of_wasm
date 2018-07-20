@@ -60,12 +60,10 @@ let symbol ~module_name = function
   | DefinedFunction { core_info } ->
       module_name ^ "_funcinternal_" ^ (string_of_int core_info.id)
   | ImportedFunction { import_info ; _ } ->
-      (* "env"-imported functions are treated as unqualified *)
-      if import_info.module_name = "env" then
-        import_info.function_name
-      (* "spectest"-imported functions are qualified, but use C conventions
+      (* "spectest" and "env"-imported functions use C conventions
        * so must call "cfunc" version of the export *)
-      else if import_info.module_name = "spectest" then
+      if import_info.module_name = "spectest"
+          || import_info.module_name = "env" then
         import_info.module_name ^ "_cfunc_" ^ import_info.function_name
       else
         import_info.module_name ^ "_func_" ^ import_info.function_name
