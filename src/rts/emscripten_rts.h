@@ -1,0 +1,30 @@
+#ifndef CMM_OF_WASM_EMSCRIPTEN_RTS
+#define CMM_OF_WASM_EMSCRIPTEN_RTS
+
+uint64_t env_global_ABORT = 0;
+uint64_t env_global_EXITSTATUS = 0;
+double env_global_NaN = NAN;
+double env_global_Infinity = INFINITY;
+
+// Hack: just taking this from PolyBenchC output code at the moment
+uint64_t env_global_TOTAL_STACK = 5242880;
+uint64_t env_global_TOTAL_MEMORY = 16777216;
+
+uint64_t env_global_GLOBAL_BASE = 1024;
+
+uint64_t env_global_STATIC_BASE = 0;
+uint64_t env_global_STATIC_BUMP = 5840;
+uint64_t env_global_STATICTOP = 0;
+uint64_t env_global_STACK_BASE = 0;
+uint64_t env_global_STACKTOP = 0;
+uint64_t env_global_STACK_MAX = 0;
+uint64_t env_global_DYNAMIC_BASE = 0;
+uint64_t env_global_DYNAMICTOP_PTR = 0;
+uint64_t env_global_tempDoublePtr = 0;
+
+uint64_t env_global_tableBase = 0;
+uint64_t env_global_memoryBase = 0;
+
+wasm_rt_table_t env_table_table;
+wasm_rt_memory_t env_memory_memory;
+#endif
