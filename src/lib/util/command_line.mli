@@ -14,3 +14,4 @@ val rts_header : unit -> string
 val initial_fuel : unit -> int
 val keep_temp : unit -> bool
 val prefix : unit -> string option
+val colouring_allocator : unit -> bool

@@ -27,9 +27,6 @@ let bind_var v env =
 
 let nodbg = Debuginfo.none
 
-(* Recursive call depth must be bounded. We use a notion of "fuel" for this. *)
-let fuel_ident = Ident.create "FUEL"
-
 (* Integer operations *)
 
 let u32_max = Nativeint.of_string "0x00000000FFFFFFFF"
@@ -821,6 +818,8 @@ let compile_terminator env =
       let br_id = Compile_env.lookup_label (Branch.label b) env in
       Cexit (br_id, args) in
 
+  let fuel_ident = Compile_env.fuel_ident env in
+
   let local_call_noreturn fn_addr =
       (* No return values: typ_void in call, csequence, and branch args *)
     fun args_cvars br_id cont_args_cvars ->
@@ -1048,6 +1047,9 @@ and compile_term env term = compile_body env (term.terminator) (term.body)
 
 (* IR function to CMM function *)
 let compile_function (ir_func: Stackless.func) func_md env =
+  (* Firstly, reset the environment *)
+  Compile_env.reset env;
+  let fuel_ident = Compile_env.fuel_ident env in
   (* Name *)
   let name = Compile_env.func_symbol func_md env in
   (* Arguments: Need to bind each param in the env we will
@@ -1370,6 +1372,7 @@ let module_function_exports env (ir_mod: Stackless.module_) =
     let name = sanitise x.name in
     match x.edesc with
       | FuncExport v ->
+          Compile_env.reset env;
           let func = Int32Map.find v (ir_mod.function_metadata) in
           let symbol = export_symbol name in
           let fty = Func.type_ func in
@@ -1379,6 +1382,8 @@ let module_function_exports env (ir_mod: Stackless.module_) =
             Cconst_symbol (Compile_env.func_symbol func env) in
           let args_with_tys =
             List.map (fun ty -> (Ident.create "arg", compile_type ty)) arg_tys in
+          let args_with_tys =
+            args_with_tys @ [(Compile_env.fuel_ident env, typ_int)] in
           let arg_vars = List.map (fun (ident, _) -> Cvar ident) args_with_tys in
           [Cfunction {
               fun_name = symbol;
@@ -1399,8 +1404,7 @@ let compile_module name (ir_mod: Stackless.module_) =
     Compile_env.create
       ~module_name:sanitised_name
       ~memory:ir_mod.memory_metadata
-      ~table:ir_mod.table
-      ~imported_function_count:ir_mod.imported_function_count in
+      ~table:ir_mod.table in
   let (elem_data, data_info) = module_data name ir_mod in
   let init = init_function name env ir_mod data_info in
 

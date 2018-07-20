@@ -14,6 +14,7 @@ module Refs = struct
   let initial_fuel = ref 500
   let keep_temp = ref false
   let prefix = ref None
+  let colouring_allocator = ref false
 end
 
 let options =
@@ -30,7 +31,8 @@ let options =
     (noshort, "header-prefix", None, Some (fun s -> Refs.header_prefix_path := (Some s)));
     (noshort, "fuel", None, Some (fun i -> Refs.initial_fuel := (int_of_string i)));
     ('t', "keep-temp", Some (fun () -> Refs.keep_temp := true), None);
-    ('p', "prefix", None, Some (fun s -> Refs.prefix := (Some s)))
+    ('p', "prefix", None, Some (fun s -> Refs.prefix := (Some s)));
+    (noshort, "colouring", Some (fun () -> Refs.colouring_allocator := true), None)
   ]
 
 let set_filename fn = Refs.filename := fn
@@ -94,3 +96,5 @@ let initial_fuel () = !Refs.initial_fuel
 let keep_temp () = !Refs.keep_temp
 
 let prefix () = !Refs.prefix
+
+let colouring_allocator () = !Refs.colouring_allocator

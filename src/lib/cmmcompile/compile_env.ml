@@ -6,10 +6,10 @@ type t = {
   module_name : string;
   memory: Ir.Stackless.memory option;
   table : Ir.Stackless.table option;
-  imported_function_count: int
+  mutable fuel_ident: Ident.t
 }
 
-let create ~module_name ~memory ~table ~imported_function_count = {
+let create ~module_name ~memory ~table = {
   var_env = Hashtbl.create 200;
   label_env = Hashtbl.create 100;
   const_env = Hashtbl.create 200;
@@ -17,8 +17,15 @@ let create ~module_name ~memory ~table ~imported_function_count = {
   module_name;
   memory;
   table;
-  imported_function_count
+  fuel_ident = Ident.create "fuel"
 }
+
+let reset env =
+  Hashtbl.reset env.var_env;
+  Hashtbl.reset env.label_env;
+  Hashtbl.reset env.const_env;
+  env.label_count <- 0;
+  env.fuel_ident <- Ident.create "fuel"
 
 let module_name env = env.module_name
 
@@ -53,9 +60,9 @@ let memory_symbol env =
         Printf.sprintf "%s_memory_%s" module_name memory_name
     | _ -> env.module_name ^ "_internalmemory"
 
-let imported_function_count env = env.imported_function_count
-
 let add_constant var const env = Hashtbl.replace env.const_env var const
+
+let fuel_ident env = env.fuel_ident
 
 (* Tries to resolve a constant. If it's in the constant environment,
  * then returns the cached constant. *)

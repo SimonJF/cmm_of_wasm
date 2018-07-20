@@ -60,8 +60,9 @@ static void error(const char* file, int line, const char* format, ...) {
 #define ASSERT_RETURN(f)                           \
   do {                                             \
     g_tests_run++;                                 \
-    if (wasm_rt_impl_try() != 0) {                 \
-      error(__FILE__, __LINE__, #f " trapped.\n"); \
+    int res = wasm_rt_impl_try();                  \
+    if (res)                     {                 \
+      error(__FILE__, __LINE__, #f " trapped (%d).\n", res); \
     } else {                                       \
       f;                                           \
       g_tests_passed++;                            \
@@ -71,8 +72,9 @@ static void error(const char* file, int line, const char* format, ...) {
 #define ASSERT_RETURN_T(type, fmt, f, expected)                          \
   do {                                                                   \
     g_tests_run++;                                                       \
-    if (wasm_rt_impl_try() != 0) {                                       \
-      error(__FILE__, __LINE__, #f " trapped.\n");                       \
+    int res = wasm_rt_impl_try();                  \
+    if (res)                     {                 \
+      error(__FILE__, __LINE__, #f " trapped (%d).\n", res); \
     } else {                                                             \
       type actual = f;                                                   \
       if (is_equal_##type(actual, expected)) {                           \
