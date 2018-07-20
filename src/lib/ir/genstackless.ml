@@ -545,7 +545,6 @@ let ir_module (ast_mod: Annotated.module_) =
 
     (* And for now, that should be it? *)
     { function_metadata = func_metadata_map;
-      imported_function_count = Int32.to_int func_import_count;
       function_ir;
       globals;
       start;

@@ -5,6 +5,7 @@ open Util.Trace
 
 let gen_asm out name cmm =
   Clflags.dump_linear := Command_line.dump_linear ();
+  Clflags.use_linscan := (not (Command_line.colouring_allocator ()));
   Emitaux.create_asm_file := true;
   Emitaux.output_channel := open_out out;
   Compilenv.reset ?packname:None name;

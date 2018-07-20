@@ -9,10 +9,6 @@ type cmm_address = Cmm.expression
 
 
 module Memory = struct
-  (* We may need to do some intermediate bindings -- in order to stop
-   * this blowing up the register allocator, we can just create the single
-   * identifier and use that, since they won't be live at the same time *)
-  let eo_ident = Ident.create "eo_ident"
 
   let nodbg = Debuginfo.none
   let i64_to_native = Int64.to_nativeint
@@ -137,6 +133,7 @@ module Memory = struct
     let static_offset = Nativeint.of_int32 op.offset in
     let chunk = chunk_of_loadop op in
     let eo = effective_offset dynamic_pointer static_offset in
+    let eo_ident = Ident.create "eo_ident" in
     let eo_var = Cvar eo_ident in
 
     let expr eo =
@@ -168,6 +165,7 @@ module Memory = struct
     let static_offset = Nativeint.of_int32 op.offset in
     let chunk = chunk_of_storeop op in
     let eo = effective_offset dynamic_pointer static_offset in
+    let eo_ident = Ident.create "eo_ident" in
     let eo_var = Cvar eo_ident in
     (* As above. *)
     let expr eo =
