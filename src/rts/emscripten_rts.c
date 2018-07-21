@@ -113,6 +113,12 @@ void rts_abort(char* str) {
   env_global_ABORT = 1;
   env_global_EXITSTATUS = 1;
   printf("abort: %s\n", str);
+  exit(-1);
+}
+
+void env_cfunc_abort(char* str) {
+  printf("abort\n");
+  exit(-1);
 }
 
 void env_cfunc_nullFunc_ii(char* x) {
@@ -133,17 +139,24 @@ void env_cfunc____assert_fail(char* condition, char* filename,
   rts_abort(buf);
 }
 
-void env_cfunc___exit(int status) {
+void env_cfunc___exit(uint32_t status) {
   exit(status);
 }
 
-void env_cfunc__exit(int status) {
+void env_cfunc__exit(uint32_t status) {
   exit(status);
+}
+
+uint32_t env_cfunc____setErrNo(uint32_t value) {
+  // FIXME: This should call XXX_cfunc____errno_location() to
+  // ascertain the error number location, and then write the
+  // error number to the result >>2 in the heap.
+  return value;
 }
 
 
 // Wrappers
-int env_cfunc__gettimeofday(uint32_t ptr) {
+uint32_t env_cfunc__gettimeofday(uint32_t ptr) {
   uint8_t* heap_base = env_memory_memory.data;
   struct timeval time_struct;
   gettimeofday(&time_struct, NULL);
@@ -168,8 +181,10 @@ void env_cfunc_enlargeMemory() {
   env_cfunc_abortOnCannotGrowMemory();
 }
 
-uint64_t env_cfunc_getTotalMemory() {
-  return env_global_TOTAL_MEMORY;
+uint32_t env_cfunc_getTotalMemory() {
+  uint32_t ret = (uint32_t) (env_global_TOTAL_MEMORY);
+  fprintf(stderr, "total memory: %d\n", ret);
+  return ret;
 }
 
 void env_cfunc_abortStackOverflow(uint32_t alloc_size) {
@@ -182,15 +197,29 @@ void env_cfunc_abortStackOverflow(uint32_t alloc_size) {
   rts_abort(buffer);
 }
 
+int static_alloc(int size) {
+  int ret = env_global_STATICTOP;
+ // Implementation taken from Emscripten JS RTS.
+ // Honestly, I haven't got a clue.
+ // & -16 means clearing the lowest 4 bits...
+  env_global_STATICTOP =
+    (env_global_STATICTOP + size + 15) & -16;
+  assert(env_global_STATICTOP < env_global_TOTAL_MEMORY);
+  return ret;
+}
+
+int align_memory(int size) {
+  int factor = 16; // 16-bit alignment by default
+  return ((int) (ceil(((double) size) / ((double) factor)))) * factor;
+}
+
+
 void env_init() {
-  // Initialise stack top / max
-  env_global_STACKTOP =
-    env_global_STACK_BASE + env_global_TOTAL_STACK;
-  env_global_STACK_MAX = env_global_STACK_BASE;
-  env_global_STATIC_BASE = env_global_GLOBAL_BASE;
-  env_global_STATICTOP = env_global_STATIC_BASE + env_global_STATIC_BUMP;
-  env_global_tempDoublePtr = env_global_STATICTOP;
-  env_global_STATICTOP += 16;
+  // FIXME: HACK -- this is taken from the PolyBenchC output code at the
+  // moment.
+  env_global_TOTAL_STACK = 5242880;
+  env_global_TOTAL_MEMORY = 134217728;
+
 
   // Allocate table and memory
   wasm_rt_allocate_memory(&env_memory_memory,
@@ -198,4 +227,41 @@ void env_init() {
       env_global_TOTAL_MEMORY / WASM_PAGE_SIZE);
   wasm_rt_allocate_table(&env_table_table, 1024, -1);
 
+
+  // Global initialisation
+  env_global_ABORT = 0;
+  env_global_EXITSTATUS = 0;
+  env_global_GLOBAL_BASE = 1024;
+  env_global_STATIC_BUMP = 5840;
+  env_global_STATIC_BASE = 0;
+  env_global_STACK_BASE = 0;
+  env_global_DYNAMIC_BASE = 0;
+  env_global_DYNAMICTOP_PTR = 0;
+  env_global_tableBase = 0;
+  global_global_NaN = NAN;
+  global_global_Infinity = INFINITY;
+
+
+  env_global_STATIC_BASE = env_global_GLOBAL_BASE;
+  env_global_memoryBase = env_global_STATIC_BASE;
+
+  env_global_STATICTOP = env_global_STATIC_BASE + env_global_STATIC_BUMP;
+
+  // Initialise tempDoublePtr
+  env_global_tempDoublePtr = env_global_STATICTOP;
+  env_global_STATICTOP += 16;
+
+
+  // Initialise stack base / top / max
+  env_global_DYNAMICTOP_PTR = static_alloc(4);
+  uint64_t base_ptr = align_memory(env_global_STATICTOP);
+  env_global_STACK_BASE = base_ptr;
+  env_global_STACKTOP = base_ptr;
+  env_global_STACK_MAX = env_global_STACK_BASE + env_global_TOTAL_STACK;
+
+  // Initialise dynamic base, and save to memory
+  env_global_DYNAMIC_BASE = align_memory(env_global_STACK_MAX);
+  uint8_t* heap_base = env_memory_memory.data;
+  heap_base[env_global_DYNAMICTOP_PTR] = (uint32_t) env_global_DYNAMIC_BASE;
+  assert(env_global_DYNAMIC_BASE < env_global_TOTAL_MEMORY);
 }
