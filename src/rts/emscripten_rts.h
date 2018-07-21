@@ -1,6 +1,19 @@
 #ifndef CMM_OF_WASM_EMSCRIPTEN_RTS
 #define CMM_OF_WASM_EMSCRIPTEN_RTS
 
+#include <sys/time.h>
+#include <sys/uio.h>
+#include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <math.h>
+#include <assert.h>
+#include "wasm-rt.h"
+
+#define WASM_PAGE_SIZE 65535
+
 uint64_t env_global_ABORT = 0;
 uint64_t env_global_EXITSTATUS = 0;
 double env_global_NaN = NAN;
@@ -27,4 +40,13 @@ uint64_t env_global_memoryBase = 0;
 
 wasm_rt_table_t env_table_table;
 wasm_rt_memory_t env_memory_memory;
+
+
+uint32_t env_cfunc____syscall54(uint32_t which, uint32_t varargs);
+uint32_t env_cfunc____syscall6(uint32_t which, uint32_t varargs);
+uint32_t env_cfunc____syscall140(uint32_t which, uint32_t varargs);
+uint32_t env_cfunc____syscall146(uint32_t which, uint32_t varargs);
+uint32_t env_cfunc__emscripten_memcpy_big(uint32_t dest,
+    uint32_t src, uint32_t num);
+
 #endif
