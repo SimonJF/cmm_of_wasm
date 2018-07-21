@@ -273,6 +273,9 @@ let header ~prefix ~exports =
             Printf.sprintf "%s* %s;" (string_of_ctype type_) name
     ) exports
     |> String.concat "\n" in
+  let init_stub_header = Printf.sprintf "void %s_init();\n" prefix in
+  let header_exports = init_stub_header ^ header_exports in
+
 
   let header_name =
     Printf.sprintf "__CMMOFWASM_%s_H" (String.uppercase_ascii prefix) in
