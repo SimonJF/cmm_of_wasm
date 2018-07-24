@@ -55,6 +55,7 @@ uint32_t env_cfunc____syscall54(uint32_t which, uint32_t varargs) {
 
 uint32_t env_cfunc____syscall6(uint32_t which, uint32_t varargs) {
   varargs_position = varargs;
+  varargs_get(); // close
   // close
   // Since we're going to be working on either stdout, stderr, or stdin,
   // it doesn't make a whole lot of sense to close them...
@@ -158,10 +159,10 @@ uint32_t env_cfunc____setErrNo(uint32_t value) {
 // Wrappers
 uint32_t env_cfunc__gettimeofday(uint32_t ptr) {
   uint8_t* heap_base = env_memory_memory.data;
-  struct timeval time_struct;
+    struct timeval time_struct;
   gettimeofday(&time_struct, NULL);
-  heap_base[ptr] = time_struct.tv_sec;
-  heap_base[ptr + 4] = time_struct.tv_usec;
+  *((uint32_t*) (heap_base + ptr)) = (uint32_t) time_struct.tv_sec;
+  *((uint32_t*) (heap_base + ptr + 4)) = (uint32_t) time_struct.tv_usec;
   return 0;
 }
 
@@ -262,6 +263,7 @@ void env_init() {
   // Initialise dynamic base, and save to memory
   env_global_DYNAMIC_BASE = align_memory(env_global_STACK_MAX);
   uint8_t* heap_base = env_memory_memory.data;
-  heap_base[env_global_DYNAMICTOP_PTR] = (uint32_t) env_global_DYNAMIC_BASE;
+  *((uint32_t*) (heap_base + env_global_DYNAMICTOP_PTR)) =
+    (uint32_t) env_global_DYNAMIC_BASE;
   assert(env_global_DYNAMIC_BASE < env_global_TOTAL_MEMORY);
 }
