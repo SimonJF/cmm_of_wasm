@@ -761,10 +761,9 @@ let compile_expression env =
               (* If it's immutable, we may simply return its (compiled) initial
                * value. *)
               compile_value v
-          | DefinedGlobal { initial_value = AnotherGlobal g ; _ } ->
-              (* If we're referencing another global, then we know by
-               * the specification that the other global *must* be an
-               * imported global. *)
+          | DefinedGlobal _ ->
+              (* If it's been initialised from another global, we need
+               * to do a load. *)
               load_global g
           | ImportedGlobal _ ->
               (* If we're referencing an imported global, we load that. *)
