@@ -1154,14 +1154,29 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
               | Some x -> Cconst_natint (Nativeint.of_int32 x)
               | None -> Cconst_natint (Nativeint.of_int max_addressable_pages)
           end in
-        (* Perform allocation, then initialise data *)
-          Csequence (
-            Cop (
-              Cextcall ("wasm_rt_allocate_memory", typ_void, false, None),
-              [memory_symbol; min_pages; max_pages],
-              nodbg
-            ),
-            Clet (root_ident, root, init_data)) in
+          (* Perform allocation, then initialise data *)
+
+        let calls =
+          if Util.Command_line.explicit_bounds_checks () then
+            [
+              Cop (
+                Cextcall ("wasm_rt_allocate_memory", typ_void, false, None),
+                [memory_symbol; min_pages; max_pages; Cconst_int 0],
+                nodbg
+              );
+            ]
+          else
+            [
+              Cop (
+                Cextcall ("wasm_rt_allocate_memory", typ_void, false, None),
+                [memory_symbol; min_pages; max_pages; Cconst_int 1],
+                nodbg
+              );
+              Cop (
+                Cextcall ("wasm_rt_setup_signal_handlers", typ_void, false, None),
+                [], nodbg)
+            ] in
+          Csequence (call_seq calls, Clet (root_ident, root, init_data)) in
 
   (* Allocate table if required, then initialise the table with elements *)
   let table_body =
@@ -1320,11 +1335,11 @@ let module_memory env (ir_mod: Stackless.module_) export_info =
       [Cglobal_symbol name; Cdefine_symbol name])
       export_info.memory_symbols |> List.concat in
 
-  (* Memory symbol: needs 3 words of space to store struct created by RTS *)
+  (* Memory symbol: needs 4 words of space to store struct created by RTS *)
   (* Must only define a memory symbol for an internal memory symbol! *)
   match ir_mod.memory_metadata with
     | Some (LocalMemory _) ->
-      let struct_size = Arch.size_int * 3 in
+      let struct_size = Arch.size_int * 4 in
       let memory_symb =
         [Cdefine_symbol (Compile_env.memory_symbol env); Cskip struct_size] in
       memory_exports @ memory_symb

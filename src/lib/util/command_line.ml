@@ -15,6 +15,7 @@ module Refs = struct
   let keep_temp = ref false
   let prefix = ref None
   let colouring_allocator = ref false
+  let explicit_bounds_checks = ref false
 end
 
 let options =
@@ -32,7 +33,8 @@ let options =
     (noshort, "fuel", None, Some (fun i -> Refs.initial_fuel := (int_of_string i)));
     ('t', "keep-temp", Some (fun () -> Refs.keep_temp := true), None);
     ('p', "prefix", None, Some (fun s -> Refs.prefix := (Some s)));
-    (noshort, "colouring", Some (fun () -> Refs.colouring_allocator := true), None)
+    (noshort, "colouring", Some (fun () -> Refs.colouring_allocator := true), None);
+    (noshort, "explicit-bounds-checks", Some (fun () -> Refs.explicit_bounds_checks := true), None)
   ]
 
 let set_filename fn = Refs.filename := fn
@@ -98,3 +100,6 @@ let keep_temp () = !Refs.keep_temp
 let prefix () = !Refs.prefix
 
 let colouring_allocator () = !Refs.colouring_allocator
+
+let explicit_bounds_checks () = !Refs.explicit_bounds_checks
+
