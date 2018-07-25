@@ -33,7 +33,6 @@
 #define PAGE_SIZE 65536
 
 uint32_t wasm_rt_call_stack_depth;
-bool signals_initialised = false;
 
 jmp_buf g_jmp_buf;
 
@@ -46,34 +45,33 @@ void wasm_rt_trap(wasm_rt_trap_t code) {
 // Handles segmentation faults when using mmap'ed memory,
 // allowing memory violations to be reported gracefully
 // as traps
-void wasm_rt_signal_handler(int sig) {
-  wasm_rt_trap(WASM_RT_TRAP_OOB);
+void wasm_rt_signal_handler(int sig, siginfo_t* info, void* something_else) {
+  longjmp(g_jmp_buf, WASM_RT_TRAP_OOB);
 }
 
 void wasm_rt_setup_signal_handlers() {
-  if (!signals_initialised) {
-    struct sigaction sa;
-    sa.sa_handler = wasm_rt_signal_handler;
-    sigemptyset(&(sa.sa_mask));
-    sigaddset(&(sa.sa_mask), SIGSEGV);
-    sigaction(SIGSEGV, &sa, NULL);
-    signals_initialised = true;
-  }
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(struct sigaction));
+  sigemptyset(&(sa.sa_mask));
+
+  sa.sa_flags = SA_NODEFER;
+  sa.sa_sigaction = wasm_rt_signal_handler;
+
+  sigaction(SIGSEGV, &sa, NULL);
 }
 
-void wasm_rt_malloc_memory(wasm_rt_memory_t* memory,
-                           uint32_t size) {
+void wasm_rt_malloc_memory(wasm_rt_memory_t* memory) {
   memory->data = calloc(memory->size, 1);
 }
 
 // mmap allows us to allocate an area of memory such that we are
 // guaranteed to raise a segmentation fault should the access
 // exceed the memory bounds.
-void wasm_rt_mmap_memory(wasm_rt_memory_t* memory,
-                         uint32_t size) {
+void wasm_rt_mmap_memory(wasm_rt_memory_t* memory) {
+  uint32_t size = memory->size;
   if (size == 0) {
     // mmap doesn't like 0-sized arguments.
-    memory->data = 0xBAADF00D;
+    memory->data = NULL;
     return;
   }
 
@@ -98,10 +96,10 @@ void wasm_rt_allocate_memory(wasm_rt_memory_t* memory,
   uint32_t size = initial_pages * PAGE_SIZE;
   memory->size = size;
   if (use_mmap) {
-    wasm_rt_mmap_memory(memory, size);
+    wasm_rt_mmap_memory(memory);
     memory->use_mmap = true;
   } else {
-    wasm_rt_malloc_memory(memory, size);
+    wasm_rt_malloc_memory(memory);
     memory->use_mmap = false;
   }
 }
@@ -112,7 +110,11 @@ uint32_t wasm_rt_grow_memory(wasm_rt_memory_t* memory, uint32_t delta) {
   uint32_t new_pages = memory->pages + delta;
   // Check whether we can grow
   if (new_pages < old_pages || new_pages > memory->max_pages) {
-    return (uint32_t)-1;
+    return (uint32_t) -1;
+  }
+
+  if (new_pages == 0) {
+    return (uint32_t) 0;
   }
 
   // If so, set new pages and new size
@@ -121,13 +123,19 @@ uint32_t wasm_rt_grow_memory(wasm_rt_memory_t* memory, uint32_t delta) {
 
   // If we're using mmap'ed memory, mremap, otherwise realloc
   if (memory->use_mmap) {
-    uint8_t* ptr =
-      mremap(memory->data, memory->size, new_size, MREMAP_MAYMOVE);
-    if (ptr == MAP_FAILED) {
-      err(1, "mremap");
-      exit(1);
+    // If old size is zero, we need to e mmap instead of mremap
+    if (old_pages == 0) {
+      memory->size = new_size;
+      wasm_rt_mmap_memory(memory);
+    } else {
+      uint8_t* ptr =
+        mremap(memory->data, memory->size, new_size, MREMAP_MAYMOVE);
+      if (ptr == MAP_FAILED) {
+        err(1, "mremap");
+        exit(1);
+      }
+      memory->data = ptr;
     }
-    memory->data = ptr;
   } else {
     memory->data = realloc(memory->data, new_size);
   }
@@ -135,6 +143,7 @@ uint32_t wasm_rt_grow_memory(wasm_rt_memory_t* memory, uint32_t delta) {
   memory->size = new_size;
   return old_pages;
 }
+
 
 void wasm_rt_allocate_table(wasm_rt_table_t* table,
                             uint32_t elements,
