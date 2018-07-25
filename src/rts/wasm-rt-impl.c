@@ -68,19 +68,24 @@ void wasm_rt_malloc_memory(wasm_rt_memory_t* memory) {
 // guaranteed to raise a segmentation fault should the access
 // exceed the memory bounds.
 void wasm_rt_mmap_memory(wasm_rt_memory_t* memory) {
-  uint32_t size = memory->size;
-  if (size == 0) {
-    // mmap doesn't like 0-sized arguments.
-    memory->data = NULL;
-    return;
-  }
+  // Reserve (but don't allocate!) 8GB.
+  // This is because WASM addresses are 33-bits (i.e.,
+  // 32-bits without wraparound). We can then mprotect(NONE)
+  // the pages that are not available.
+  uint32_t size = 0x00000001FFFFFFFF;
 
   uint8_t* ptr =
-    (uint8_t*)(mmap(NULL, size, PROT_READ|PROT_WRITE,
+    (uint8_t*)(mmap(NULL, size, PROT_NONE,
           MAP_PRIVATE|MAP_ANONYMOUS, -1, 0));
 
   if (ptr == MAP_FAILED) {
     err(1, "mmap");
+    exit(1);
+  }
+
+  // Mark the accessible pages as read/write enabled
+  if (mprotect(ptr, memory->size, PROT_READ|PROT_WRITE) == -1) {
+    err(1, "mprotect");
     exit(1);
   }
 
@@ -118,29 +123,18 @@ uint32_t wasm_rt_grow_memory(wasm_rt_memory_t* memory, uint32_t delta) {
   }
 
   // If so, set new pages and new size
+  uint32_t old_size = memory->size;
   uint32_t new_size = new_pages * PAGE_SIZE;
+  memory->size = new_size;
   memory->pages = new_pages;
 
   // If we're using mmap'ed memory, mremap, otherwise realloc
   if (memory->use_mmap) {
-    // If old size is zero, we need to e mmap instead of mremap
-    if (old_pages == 0) {
-      memory->size = new_size;
-      wasm_rt_mmap_memory(memory);
-    } else {
-      uint8_t* ptr =
-        mremap(memory->data, memory->size, new_size, MREMAP_MAYMOVE);
-      if (ptr == MAP_FAILED) {
-        err(1, "mremap");
-        exit(1);
-      }
-      memory->data = ptr;
-    }
+    mprotect(memory->data, new_size, PROT_READ|PROT_WRITE);
   } else {
     memory->data = realloc(memory->data, new_size);
   }
 
-  memory->size = new_size;
   return old_pages;
 }
 

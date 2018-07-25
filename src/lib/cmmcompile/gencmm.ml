@@ -244,11 +244,7 @@ let compile_binop env op v1 v2 =
 
   let division_operation normalise div_f =
     let ty = Var.type_ v2 in
-    let cmp =
-       match ty with
-          | I32Type -> Cconst_int 0
-          | I64Type -> Cconst_natint Nativeint.zero
-          | _ -> assert false in
+    let cmp = Cconst_natint 0n in
     let normal_e1 = normalise ty e1 in
     let normal_e2 = normalise ty e2 in
     let norm_e1_ident = Ident.create "_norme1" in
@@ -305,7 +301,7 @@ let compile_binop env op v1 v2 =
                 trap TrapIntOverflow else
               Cconst_natint (Nativeint.div i1 i2)
           | _ ->
-            let div = Cop (div_op, [norm_e1; norm_e2], nodbg) in
+              let div = Cop (div_op, [norm_e1; Cop (Cor, [norm_e2; norm_e2], nodbg)], nodbg) in
             div_overflow_check
               signed norm_e1 norm_e2 div (trap TrapIntOverflow)) in
 
