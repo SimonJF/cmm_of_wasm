@@ -256,6 +256,33 @@ let compile_binop env op v1 v2 =
 
   let overflow_check_2 = Nativeint.minus_one in
 
+  let op_and e1 e2 =
+    Cop (Ccmpa Cne, [Cop (Cand, [e1; e2], nodbg);
+      Cconst_natint 0n], nodbg) in
+
+  let op_eq e1 e2 = Cop (Ccmpa Ceq, [e1; e2], nodbg) in
+
+  let op_or e1 e2 =
+    Cop (Ccmpa Cne, [Cop (Cor, [e1; e2], nodbg); Cconst_natint 0n], nodbg) in
+
+  (* Check if integer division would overflow.
+   * If so, overflow is returned. If not, normal is returned. *)
+  let check_overflow e1 e2 on_overflow on_no_overflow =
+    Cifthenelse (op_and
+      (op_eq e1 (Cconst_natint overflow_check_1))
+      (op_eq e2 (Cconst_natint overflow_check_2)),
+      (* Then special case to 0. *)
+      on_overflow,
+      (* Otherwise, do the normal remainder routine. *)
+      on_no_overflow) in
+
+  (* Checks division by zero. If so, traps. *)
+  let check_division_by_zero divisor e =
+    Cifthenelse (
+      op_eq divisor (Cconst_int 0),
+      trap TrapDivZero,
+      e) in
+
 
   let rem signed =
     let ty = Var.type_ v1 in
@@ -268,86 +295,122 @@ let compile_binop env op v1 v2 =
       | Cconst_natint i1, Cconst_natint i2 when signed ->
           if i2 = 0n then trap TrapDivZero else
           Cconst_natint (Nativeint.rem i1 i2)
+      | _, Cconst_natint i2 when i2 = 0n -> trap TrapDivZero
       | _ ->
         (* In the case of remainder, we actually do need to special-case
          * the division operator, since remainder doesn't actually overflow. *)
-        let op_and e1 e2 = Cop (Cand, [e1; e2], nodbg) in
-        let op_eq e1 e2 = Cop (Ccmpi Ceq, [e1; e2], nodbg) in
         let remainder_op =
           Cop (Csubi, [nat_e1;
             Cop (Cmuli, [
               Cop (div_op, [nat_e1; nat_e2], nodbg);
               nat_e2], nodbg)], nodbg) in
 
-        (* If the division would overflow... *)
         if signed then
-          Cifthenelse (op_and
-            (op_eq nat_e1 (Cconst_natint overflow_check_1))
-            (op_eq nat_e2 (Cconst_natint overflow_check_2)),
-            (* Then special case to 0. *)
-            Cconst_int 0,
-            (* Otherwise, do the normal remainder routine. *)
-            remainder_op)
-        else
-          remainder_op in
+          remainder_op
+            |> check_division_by_zero nat_e2
+            |> check_overflow nat_e1 nat_e2 (Cconst_int 0)
+        else check_division_by_zero nat_e2 remainder_op in
 
   let div signed =
     let ty = Var.type_ v1 in
     let normalise =
       if signed then normalise_signed ty else normalise_unsigned ty in
-    let div_op = if signed then Cdivi else Cdiviu in
     let nat_e1 = to_natint (normalise e1) in
     let nat_e2 = to_natint (normalise e2) in
+    let divide_op =
+      let op = if signed then Cdivi else Cdiviu in
+      Cop (op, [nat_e1; nat_e2], nodbg) in
     match nat_e1, nat_e2 with
       | Cconst_natint i1, Cconst_natint i2 when signed ->
           if i2 = 0n then trap TrapDivZero else
           if i1 = overflow_check_1 && i2 = overflow_check_2 then
             trap TrapIntOverflow else
           Cconst_natint (Nativeint.div i1 i2)
+      | _, Cconst_natint 0n -> trap TrapDivZero
+      | e1, Cconst_natint i when i = overflow_check_2 && signed ->
+          Cifthenelse (op_eq e1 (Cconst_natint overflow_check_1),
+          trap TrapIntOverflow,
+          divide_op)
+      | Cconst_natint i, e2 when i = overflow_check_1 && signed ->
+          (* In the case that the numerator could lead to a possible
+           * overflow, we need to check whether the divisor is either
+           * the second overflow, or zero. *)
+          Cifthenelse (
+            op_or
+              (op_eq e2 (Cconst_natint overflow_check_2))
+              (op_eq e2 (Cconst_int 0)),
+              trap TrapDivZero, (* Slighly inaccurate, but eh *)
+              divide_op
+          )
+      | Cconst_natint _, e2 ->
+          (* Otherwise we just have to check for division by zero *)
+          Cifthenelse (
+            op_eq e2 (Cconst_int 0),
+            trap TrapDivZero,
+            divide_op
+          )
       | _ ->
-        (* 32-bit overflows won't raise SIGFPE since they're implemented
-         * as 64-bit integers. Thus, we need to check explicitly. *)
-        let op_and e1 e2 = Cop (Cand, [e1; e2], nodbg) in
-        let op_eq e1 e2 = Cop (Ccmpi Ceq, [e1; e2], nodbg) in
-        let divide_op = Cop (div_op, [nat_e1; nat_e2], nodbg) in
+        if signed then
+          divide_op
+            |> check_division_by_zero nat_e2
+            |> check_overflow nat_e1 nat_e2 (trap TrapIntOverflow)
+        else check_division_by_zero nat_e2 divide_op in
 
-        (* If the division would overflow... *)
-        if signed && is_32 then
-          Cifthenelse (op_and
-            (op_eq nat_e1 (Cconst_natint overflow_check_1))
-            (op_eq nat_e2 (Cconst_natint overflow_check_2)),
-            (* Then trap. *)
-            trap TrapIntOverflow,
-            (* Otherwise, do the normal division routine. *)
-            divide_op)
-        else
-          divide_op in
+
+  let nativeint_mod n1 n2 =
+    Nativeint.(sub n1 (mul (div n1 n2) n2)) in
 
 
   (* shift_left: need to normalise and mod RHS, but not LHS *)
   let shift_left =
     let ty = Var.type_ v1 in
     (* Must normalise e2 and then get e2 % int width before doing the shift *)
-    let normalised_rhs = normalise_unsigned ty e2 in
-    let mod_base = if is_32 then Cconst_int 32 else Cconst_int 64 in
-    (Cop (Clsl, ([e1;
-      Cop (Cmodi, [normalised_rhs; mod_base], nodbg)]), nodbg)) in
+    let e2 = normalise_unsigned ty e2 in
+
+    let nat_e1 = to_natint e1 in
+    let nat_e2 = to_natint e2 in
+    let mod_base = if is_32 then 32n else 64n in
+
+    let shift_length =
+      match nat_e2 with
+        | Cconst_natint i ->
+            Cconst_natint (nativeint_mod i mod_base)
+        | _ -> Cop (Cmodi, [e2; Cconst_natint mod_base], nodbg) in
+
+    match nat_e1, shift_length with
+      | Cconst_natint i1, Cconst_natint i2 ->
+          Cconst_natint (Nativeint.(shift_left i1 (to_int i2)))
+      | _ -> Cop (Clsl, ([e1; shift_length]), nodbg) in
 
   (* shift_right: need to normalise LHS, and both normalise and mod RHS. *)
   let shift_right signed =
     let ty = Var.type_ v1 in
     (* Normalise LHS *)
-    let normalised_lhs =
+    let e1 =
       if signed then
         normalise_signed ty e1
       else
         normalise_unsigned ty e1 in
-    (* Must normalise e2 and then get e2 % int width before doing the shift *)
-    let normalised_rhs = normalise_unsigned ty e2 in
-    let mod_base = if is_32 then Cconst_int 32 else Cconst_int 64 in
+    let e2 = normalise_unsigned ty e2 in
+
+    let nat_e1 = to_natint e1 in
+    let nat_e2 = to_natint e2 in
+    let mod_base = if is_32 then 32n else 64n in
     let op = if signed then Casr else Clsr in
-    (Cop (op, ([normalised_lhs;
-      Cop (Cmodi, [normalised_rhs; mod_base], nodbg)]), nodbg)) in
+
+    let shift_length =
+      match nat_e2 with
+        | Cconst_natint i ->
+            Cconst_natint (nativeint_mod i mod_base)
+        | _ -> Cop (Cmodi, [e2; Cconst_natint mod_base], nodbg) in
+
+    match nat_e1, shift_length with
+      | Cconst_natint i1, Cconst_natint i2 ->
+          if signed then
+            Cconst_natint (Nativeint.(shift_right i1 (to_int i2)))
+          else
+            Cconst_natint (Nativeint.(shift_right_logical i1 (to_int i2)))
+      | _ -> Cop (op, ([e1; shift_length]), nodbg) in
 
 
   (* Rotation as two shifts and an or, Hacker's delight, p.37 *)
@@ -412,6 +475,9 @@ let compile_binop env op v1 v2 =
   let cf32 op = compile_f32_op env op v1 v2 in
   (* let cn op signed = compile_op_normalised signed env op v1 v2 in *)
 
+
+  (* TODO: This is all so brittle and requires RTS calls anyway, that I think
+   * it would be better to implement it in C. *)
   let min_or_max ~is_f32 ~is_min =
     let (e1, e2) = (rv env v1, rv env v2) in
     let op = if is_min then CFle else CFge in

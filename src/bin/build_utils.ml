@@ -7,7 +7,7 @@ open Util.Trace
 (* We have to copy this across from asmgen, unfortunately, since without
  * memory checks, the OCaml compiler does unsafe DCE on loads / stores.
  * This is against the WASM spec, and causes the tests to fail. *)
-
+(*
 
 let liveness ppf phrase =
   Liveness.fundecl ppf phrase; phrase
@@ -56,14 +56,12 @@ let compile_fundecl (ppf : Format.formatter) fd_cmm =
   fd_cmm
   ++ Profile.record ~accumulate:true "selection" Selection.fundecl
   ++ pass_dump_if ppf dump_selection "After instruction selection"
-  (*
   ++ Profile.record ~accumulate:true "comballoc" Comballoc.fundecl
   ++ pass_dump_if ppf dump_combine "After allocation combining"
   ++ Profile.record ~accumulate:true "cse" CSE.fundecl
   ++ pass_dump_if ppf dump_cse "After CSE"
-  *)
   ++ Profile.record ~accumulate:true "liveness" (liveness ppf)
-  (* ++ Profile.record ~accumulate:true "deadcode" Deadcode.fundecl *)
+  ++ Profile.record ~accumulate:true "deadcode" Deadcode.fundecl
   ++ pass_dump_if ppf dump_live "Liveness analysis"
   ++ Profile.record ~accumulate:true "spill" Spill.fundecl
   ++ Profile.record ~accumulate:true "liveness" (liveness ppf)
@@ -85,6 +83,7 @@ let compile_phrase ppf p =
   match p with
   | Cfunction fd -> compile_fundecl ppf fd
   | Cdata dl -> Emit.data dl
+  *)
 
 (* End of stuff copied from Asmgen. *)
 
@@ -95,7 +94,7 @@ let gen_asm out name cmm =
   Emitaux.output_channel := open_out out;
   Compilenv.reset ?packname:None name;
   Emit.begin_assembly ();
-  List.iter (compile_phrase Format.std_formatter) cmm;
+  List.iter (Asmgen.compile_phrase Format.std_formatter) cmm;
   Emit.end_assembly ();
   close_out !Emitaux.output_channel
 

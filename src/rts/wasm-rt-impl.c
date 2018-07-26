@@ -45,15 +45,10 @@ void wasm_rt_trap(wasm_rt_trap_t code) {
 // Handles segmentation faults when using mmap'ed memory,
 // allowing memory violations to be reported gracefully
 // as traps
-void wasm_rt_signal_handler(int sig, siginfo_t* info, void* something_else) {
-  if (sig == SIGSEGV) {
-    longjmp(g_jmp_buf, WASM_RT_TRAP_OOB);
-  } else if (sig == SIGFPE) {
-    // TODO: This could also be int overflow; consider collapsing
-    // into a single type of trap
-    longjmp(g_jmp_buf, WASM_RT_TRAP_DIV_BY_ZERO);
-  }
+void wasm_rt_sigsegv_handler(int sig, siginfo_t* info, void* something_else) {
+  longjmp(g_jmp_buf, WASM_RT_TRAP_OOB);
 }
+
 
 void wasm_rt_setup_signal_handlers() {
   struct sigaction sa;
@@ -61,10 +56,9 @@ void wasm_rt_setup_signal_handlers() {
   sigemptyset(&(sa.sa_mask));
 
   sa.sa_flags = SA_NODEFER;
-  sa.sa_sigaction = wasm_rt_signal_handler;
+  sa.sa_sigaction = wasm_rt_sigsegv_handler;
 
   sigaction(SIGSEGV, &sa, NULL);
-  sigaction(SIGFPE, &sa, NULL);
 }
 
 void wasm_rt_malloc_memory(wasm_rt_memory_t* memory) {

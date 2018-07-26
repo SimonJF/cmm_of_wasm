@@ -17,11 +17,6 @@ let empty_dce_info usages pure expr = {
   expr
 }
 
-(* An identifier used where we need to perform an action, but don't need
- * the result. This means we have fewer variables for reg allocation, but
- * still perform the necessary side-effects *)
-let impure_ident = Ident.create "impure"
-
 let increment_usages ht ident =
   (* Function parameters aren't in the hashtable. *)
   let ident_name = Ident.name ident in
@@ -136,10 +131,6 @@ let dce ht expr =
           (* Only used once, so reasonable to inline. We can kill
            * the binding. *)
           go e2
-        else if dce_info.usages = 0 && (dce_info.pure = Impure) then
-          (* Redundant load / store, but we still need to perform it.
-           * Bind it to the "impure" identifier. *)
-          Clet (impure_ident, go e1, go e2)
         else
           (* Otherwise, we need the binding. *)
           Clet (ident, go e1, go e2)
