@@ -92,6 +92,8 @@ let populate_info ht expr =
       | Cexit (_, es) -> all_pure es
       | Ctrywith (e1, _, e2) -> all_pure [e1; e2]
       | Cop (Capply _, es, _)
+      | Cop (Cdivi, es, _)
+      | Cop (Cdiviu, es, _)
       | Cop (Cextcall _, es, _)
       | Cop (Cextcall_indirect _, es, _)
       | Cop (Cload _, es, _)

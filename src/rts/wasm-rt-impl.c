@@ -46,7 +46,13 @@ void wasm_rt_trap(wasm_rt_trap_t code) {
 // allowing memory violations to be reported gracefully
 // as traps
 void wasm_rt_signal_handler(int sig, siginfo_t* info, void* something_else) {
-  longjmp(g_jmp_buf, WASM_RT_TRAP_OOB);
+  if (sig == SIGSEGV) {
+    longjmp(g_jmp_buf, WASM_RT_TRAP_OOB);
+  } else if (sig == SIGFPE) {
+    // TODO: This could also be int overflow; consider collapsing
+    // into a single type of trap
+    longjmp(g_jmp_buf, WASM_RT_TRAP_DIV_BY_ZERO);
+  }
 }
 
 void wasm_rt_setup_signal_handlers() {
@@ -58,6 +64,7 @@ void wasm_rt_setup_signal_handlers() {
   sa.sa_sigaction = wasm_rt_signal_handler;
 
   sigaction(SIGSEGV, &sa, NULL);
+  sigaction(SIGFPE, &sa, NULL);
 }
 
 void wasm_rt_malloc_memory(wasm_rt_memory_t* memory) {
@@ -69,10 +76,7 @@ void wasm_rt_malloc_memory(wasm_rt_memory_t* memory) {
 // exceed the memory bounds.
 void wasm_rt_mmap_memory(wasm_rt_memory_t* memory) {
   // Reserve (but don't allocate!) 8GB.
-  // This is because WASM addresses are 33-bits (i.e.,
-  // 32-bits without wraparound). We can then mprotect(NONE)
-  // the pages that are not available.
-  uint32_t size = 0x00000001FFFFFFFF;
+  uint64_t size = 0x00000001FFFFFFFF;
 
   uint8_t* ptr =
     (uint8_t*)(mmap(NULL, size, PROT_NONE,

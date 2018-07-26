@@ -56,10 +56,12 @@ let compile_fundecl (ppf : Format.formatter) fd_cmm =
   fd_cmm
   ++ Profile.record ~accumulate:true "selection" Selection.fundecl
   ++ pass_dump_if ppf dump_selection "After instruction selection"
+  (*
   ++ Profile.record ~accumulate:true "comballoc" Comballoc.fundecl
   ++ pass_dump_if ppf dump_combine "After allocation combining"
   ++ Profile.record ~accumulate:true "cse" CSE.fundecl
   ++ pass_dump_if ppf dump_cse "After CSE"
+  *)
   ++ Profile.record ~accumulate:true "liveness" (liveness ppf)
   (* ++ Profile.record ~accumulate:true "deadcode" Deadcode.fundecl *)
   ++ pass_dump_if ppf dump_live "Liveness analysis"

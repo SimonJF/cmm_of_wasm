@@ -241,23 +241,12 @@ let compile_binop env op v1 v2 =
   let open Libwasm.Values in
   let is_32 = match Var.type_ v1 with | I32Type -> true | _ -> false in
   let (e1, e2) = (rv env v1, rv env v2) in
+  let to_natint x =
+    match x with
+      | Cconst_int y -> Cconst_natint (Nativeint.of_int y)
+      | x -> x in
 
-  let division_operation normalise div_f =
-    let ty = Var.type_ v2 in
-    let cmp = Cconst_natint 0n in
-    let normal_e1 = normalise ty e1 in
-    let normal_e2 = normalise ty e2 in
-    let norm_e1_ident = Ident.create "_norme1" in
-    let norm_e2_ident = Ident.create "_norme2" in
-    Clet (norm_e1_ident, normal_e1,
-      Clet (norm_e2_ident, normal_e2,
-        Cifthenelse (
-          Cop (Ccmpi Ceq, [Cvar norm_e2_ident; cmp], nodbg),
-          trap TrapDivZero,
-          div_f (Cvar norm_e1_ident) (Cvar norm_e2_ident)
-        )
-      )
-    ) in
+(* Will add these back in. *)
 
   let overflow_check_1 =
     if is_32 then
@@ -267,65 +256,73 @@ let compile_binop env op v1 v2 =
 
   let overflow_check_2 = Nativeint.minus_one in
 
-  let div_overflow_check signed norm_e1 norm_e2 operation overflow =
-    if signed then
-      Cifthenelse (
-        Cop (Ccmpi Cne,
-          [(Cop (Cand, [
-              Cop (Ccmpi Ceq, [norm_e1; Cconst_natint overflow_check_1], nodbg);
-              Cop (Ccmpi Ceq, [norm_e2; Cconst_natint overflow_check_2], nodbg)], nodbg));
-           Cconst_natint 0n], nodbg),
-        overflow,
-        operation)
-    else
-      operation in
-
-  let to_natint x =
-    match x with
-      | Cconst_int y -> Cconst_natint (Nativeint.of_int y)
-      | x -> x in
-
-  let divide signed =
-    let norm_fn = if signed then normalise_signed else normalise_unsigned in
-    let div_op = if signed then Cdivi else Cdiviu in
-
-    division_operation
-      norm_fn
-      (fun norm_e1 norm_e2 ->
-        let nat_e1 = to_natint norm_e1 in
-        let nat_e2 = to_natint norm_e2 in
-        match nat_e1, nat_e2 with
-          | Cconst_natint i1, Cconst_natint i2 when signed ->
-              if i2 = 0n then trap TrapDivZero else
-              if i1 = overflow_check_1 && i2 = overflow_check_2 then
-                trap TrapIntOverflow else
-              Cconst_natint (Nativeint.div i1 i2)
-          | _ ->
-              let div = Cop (div_op, [norm_e1; Cop (Cor, [norm_e2; norm_e2], nodbg)], nodbg) in
-            div_overflow_check
-              signed norm_e1 norm_e2 div (trap TrapIntOverflow)) in
 
   let rem signed =
-    let norm_fn = if signed then normalise_signed else normalise_unsigned in
+    let ty = Var.type_ v1 in
+    let normalise =
+      if signed then normalise_signed ty else normalise_unsigned ty in
     let div_op = if signed then Cdivi else Cdiviu in
-    division_operation
-      norm_fn
-      (fun norm_e1 norm_e2 ->
-        let nat_e1 = to_natint norm_e1 in
-        let nat_e2 = to_natint norm_e2 in
-        match nat_e1, nat_e2 with
-          | Cconst_natint i1, Cconst_natint i2 when signed ->
-              if i2 = 0n then trap TrapDivZero else
-              if i1 = overflow_check_1 && i2 = overflow_check_2 then
-                trap TrapIntOverflow else
-              Cconst_natint (Nativeint.rem i1 i2)
-          | _ ->
-        let op =
-          Cop (Csubi, [norm_e1;
+    let nat_e1 = to_natint (normalise e1) in
+    let nat_e2 = to_natint (normalise e2) in
+    match nat_e1, nat_e2 with
+      | Cconst_natint i1, Cconst_natint i2 when signed ->
+          if i2 = 0n then trap TrapDivZero else
+          Cconst_natint (Nativeint.rem i1 i2)
+      | _ ->
+        (* In the case of remainder, we actually do need to special-case
+         * the division operator, since remainder doesn't actually overflow. *)
+        let op_and e1 e2 = Cop (Cand, [e1; e2], nodbg) in
+        let op_eq e1 e2 = Cop (Ccmpi Ceq, [e1; e2], nodbg) in
+        let remainder_op =
+          Cop (Csubi, [nat_e1;
             Cop (Cmuli, [
-              Cop (div_op, [norm_e1; norm_e2], nodbg);
-              norm_e2], nodbg)], nodbg) in
-        div_overflow_check signed norm_e1 norm_e2 op (Cconst_int 0)) in
+              Cop (div_op, [nat_e1; nat_e2], nodbg);
+              nat_e2], nodbg)], nodbg) in
+
+        (* If the division would overflow... *)
+        if signed then
+          Cifthenelse (op_and
+            (op_eq nat_e1 (Cconst_natint overflow_check_1))
+            (op_eq nat_e2 (Cconst_natint overflow_check_2)),
+            (* Then special case to 0. *)
+            Cconst_int 0,
+            (* Otherwise, do the normal remainder routine. *)
+            remainder_op)
+        else
+          remainder_op in
+
+  let div signed =
+    let ty = Var.type_ v1 in
+    let normalise =
+      if signed then normalise_signed ty else normalise_unsigned ty in
+    let div_op = if signed then Cdivi else Cdiviu in
+    let nat_e1 = to_natint (normalise e1) in
+    let nat_e2 = to_natint (normalise e2) in
+    match nat_e1, nat_e2 with
+      | Cconst_natint i1, Cconst_natint i2 when signed ->
+          if i2 = 0n then trap TrapDivZero else
+          if i1 = overflow_check_1 && i2 = overflow_check_2 then
+            trap TrapIntOverflow else
+          Cconst_natint (Nativeint.div i1 i2)
+      | _ ->
+        (* 32-bit overflows won't raise SIGFPE since they're implemented
+         * as 64-bit integers. Thus, we need to check explicitly. *)
+        let op_and e1 e2 = Cop (Cand, [e1; e2], nodbg) in
+        let op_eq e1 e2 = Cop (Ccmpi Ceq, [e1; e2], nodbg) in
+        let divide_op = Cop (div_op, [nat_e1; nat_e2], nodbg) in
+
+        (* If the division would overflow... *)
+        if signed && is_32 then
+          Cifthenelse (op_and
+            (op_eq nat_e1 (Cconst_natint overflow_check_1))
+            (op_eq nat_e2 (Cconst_natint overflow_check_2)),
+            (* Then trap. *)
+            trap TrapIntOverflow,
+            (* Otherwise, do the normal division routine. *)
+            divide_op)
+        else
+          divide_op in
+
 
   (* shift_left: need to normalise and mod RHS, but not LHS *)
   let shift_left =
@@ -388,7 +385,7 @@ let compile_binop env op v1 v2 =
     Clet (distance_ident, distance,
       rotate_left e1 (Cvar distance_ident) width) in
 
-    let rotate_right_i32 =
+  let rotate_right_i32 =
     let width = 32 in
     let low_set_ident = Ident.create "ror32_low_set" in
     let low_set = unset_high_32 e1 in
@@ -407,7 +404,6 @@ let compile_binop env op v1 v2 =
       Cop (Cmodi, [e2; Cconst_int width], nodbg) in
     Clet (distance_ident, distance,
       rotate_right e1 (Cvar distance_ident) width) in
-
 
   let rotate_left = if is_32 then rotate_left_i32 else rotate_left_i64 in
   let rotate_right = if is_32 then rotate_right_i32 else rotate_right_i64 in
@@ -464,8 +460,8 @@ let compile_binop env op v1 v2 =
     | Add -> cs Caddi
     | Sub -> cs Csubi
     | Mul -> cs Cmuli
-    | DivS -> divide true
-    | DivU -> divide false
+    | DivS -> div true
+    | DivU -> div false
     | RemS -> rem true
     | RemU -> rem false
     | And -> cs Cand
@@ -1167,11 +1163,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
                 Cextcall ("wasm_rt_allocate_memory", typ_void, false, None),
                 [memory_symbol; min_pages; max_pages; Cconst_int 1],
                 nodbg
-              );
-              Cop (
-                Cextcall ("wasm_rt_setup_signal_handlers", typ_void, false, None),
-                [], nodbg)
-            ] in
+              )] in
           Csequence (call_seq calls, Clet (root_ident, root, init_data)) in
 
   (* Allocate table if required, then initialise the table with elements *)
@@ -1216,6 +1208,11 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
           let fuel = Cconst_int (Util.Command_line.initial_fuel ()) in
           Cop (Capply typ_void, [fn_symbol; fuel], nodbg)
       | _ -> Ctuple [] in
+  let setup_signal_handlers =
+      Cop (
+        Cextcall ("wasm_rt_setup_signal_handlers", typ_void, false, None),
+         [], nodbg) in
+
 
   (* Sequence all instructions. Later passes perform the `() ; M ~~> M`
    * and `M ; () ~~> M` translations, so we don't have to worry about unit
@@ -1224,6 +1221,7 @@ let init_function module_name env (ir_mod: Stackless.module_) data_info =
     global_body;
     memory_body;
     table_body;
+    setup_signal_handlers;
     start_body
   ] in
 
