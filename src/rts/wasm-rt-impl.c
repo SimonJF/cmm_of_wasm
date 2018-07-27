@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
+#define _GNU_SOURCE
 #include "wasm-rt-impl.h"
-
 #include <assert.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -25,6 +25,10 @@
 #include <math.h>
 #include <string.h>
 #include <stdbool.h>
+#include <sys/mman.h>
+#include <signal.h>
+#include <unistd.h>
+#include <err.h>
 
 #define PAGE_SIZE 65536
 
@@ -37,26 +41,101 @@ void wasm_rt_trap(wasm_rt_trap_t code) {
   longjmp(g_jmp_buf, code);
 }
 
-void wasm_rt_allocate_memory(wasm_rt_memory_t* memory,
-                             uint32_t initial_pages,
-                             uint32_t max_pages) {
-  memory->pages = initial_pages;
-  memory->max_pages = max_pages;
-  memory->size = initial_pages * PAGE_SIZE;
+
+// Handles segmentation faults when using mmap'ed memory,
+// allowing memory violations to be reported gracefully
+// as traps
+void wasm_rt_sigsegv_handler(int sig, siginfo_t* info, void* something_else) {
+  longjmp(g_jmp_buf, WASM_RT_TRAP_OOB);
+}
+
+
+void wasm_rt_setup_signal_handlers() {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(struct sigaction));
+  sigemptyset(&(sa.sa_mask));
+
+  sa.sa_flags = SA_NODEFER;
+  sa.sa_sigaction = wasm_rt_sigsegv_handler;
+
+  sigaction(SIGSEGV, &sa, NULL);
+}
+
+void wasm_rt_malloc_memory(wasm_rt_memory_t* memory) {
   memory->data = calloc(memory->size, 1);
 }
+
+// mmap allows us to allocate an area of memory such that we are
+// guaranteed to raise a segmentation fault should the access
+// exceed the memory bounds.
+void wasm_rt_mmap_memory(wasm_rt_memory_t* memory) {
+  // Reserve (but don't allocate!) 8GB.
+  uint64_t size = 0x00000001FFFFFFFF;
+
+  uint8_t* ptr =
+    (uint8_t*)(mmap(NULL, size, PROT_NONE,
+          MAP_PRIVATE|MAP_ANONYMOUS, -1, 0));
+
+  if (ptr == MAP_FAILED) {
+    err(1, "mmap");
+    exit(1);
+  }
+
+  // Mark the accessible pages as read/write enabled
+  if (mprotect(ptr, memory->size, PROT_READ|PROT_WRITE) == -1) {
+    err(1, "mprotect");
+    exit(1);
+  }
+
+  memory->data = ptr;
+}
+
+void wasm_rt_allocate_memory(wasm_rt_memory_t* memory,
+                           uint32_t initial_pages,
+                           uint32_t max_pages,
+                           bool use_mmap) {
+  memory->pages = initial_pages;
+  memory->max_pages = max_pages;
+  uint32_t size = initial_pages * PAGE_SIZE;
+  memory->size = size;
+  if (use_mmap) {
+    wasm_rt_mmap_memory(memory);
+    memory->use_mmap = true;
+  } else {
+    wasm_rt_malloc_memory(memory);
+    memory->use_mmap = false;
+  }
+}
+
 
 uint32_t wasm_rt_grow_memory(wasm_rt_memory_t* memory, uint32_t delta) {
   uint32_t old_pages = memory->pages;
   uint32_t new_pages = memory->pages + delta;
+  // Check whether we can grow
   if (new_pages < old_pages || new_pages > memory->max_pages) {
-    return (uint32_t)-1;
+    return (uint32_t) -1;
   }
-  memory->data = realloc(memory->data, new_pages);
+
+  if (new_pages == 0) {
+    return (uint32_t) 0;
+  }
+
+  // If so, set new pages and new size
+  uint32_t old_size = memory->size;
+  uint32_t new_size = new_pages * PAGE_SIZE;
+  memory->size = new_size;
   memory->pages = new_pages;
-  memory->size = new_pages * PAGE_SIZE;
+
+  // If we're using mmap'ed memory, mremap, otherwise realloc
+  if (memory->use_mmap) {
+    mprotect(memory->data, new_size, PROT_READ|PROT_WRITE);
+  } else {
+    memory->data = realloc(memory->data, new_size);
+  }
+
   return old_pages;
 }
+
 
 void wasm_rt_allocate_table(wasm_rt_table_t* table,
                             uint32_t elements,

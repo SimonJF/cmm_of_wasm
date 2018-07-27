@@ -147,18 +147,22 @@ module Memory = struct
           [root; eo], nodbg)
       else base_expr in
 
-    if is_value eo then
-      with_mem_check
-        ~root
-        ~effective_offset:eo
-        ~chunk ~expr:(expr eo)
-    else
-      Clet (eo_ident, eo,
-        with_mem_check
-          ~root
-          ~effective_offset:eo_var
-          ~chunk
-          ~expr:(expr eo_var))
+    if Util.Command_line.explicit_bounds_checks () then
+      begin
+          if is_value eo then
+            with_mem_check
+              ~root
+              ~effective_offset:eo
+              ~chunk ~expr:(expr eo)
+          else
+            Clet (eo_ident, eo,
+              with_mem_check
+                ~root
+                ~effective_offset:eo_var
+                ~chunk
+                ~expr:(expr eo_var))
+      end
+    else expr eo
 
   let store ~root ~dynamic_pointer ~(op:Libwasm.Ast.storeop) ~to_store =
     let open Libwasm.Types in
@@ -176,18 +180,22 @@ module Memory = struct
         Cop (Cstore (chunk, Assignment),
         [effective_address root eo; to_store], nodbg) in
 
-    if is_value eo then
-      with_mem_check
-        ~root
-        ~effective_offset:eo
-        ~chunk ~expr:(expr eo)
-    else
-      Clet (eo_ident, eo,
-        with_mem_check
-          ~root
-          ~effective_offset:eo_var
-          ~chunk
-          ~expr:(expr eo_var))
+    if Util.Command_line.explicit_bounds_checks () then
+      begin
+        if is_value eo then
+          with_mem_check
+            ~root
+            ~effective_offset:eo
+            ~chunk ~expr:(expr eo)
+        else
+          Clet (eo_ident, eo,
+            with_mem_check
+              ~root
+              ~effective_offset:eo_var
+              ~chunk
+              ~expr:(expr eo_var))
+      end
+    else expr eo
 
   let grow root pages =
     (* I *think* it's safe to put false as allocation flag here, since

@@ -222,7 +222,7 @@ uint32_t* Z_spectestZ_global_i32Z_i = &spectest_global_i32;
 */
 
 static void init_spectest_module(void) {
-  wasm_rt_allocate_memory(&spectest_memory_memory, 1, 2);
+  wasm_rt_allocate_memory(&spectest_memory_memory, 1, 2, true);
   wasm_rt_allocate_table(&spectest_table_table, 10, 20);
 }
 

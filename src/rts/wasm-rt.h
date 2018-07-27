@@ -18,6 +18,7 @@
 #define WASM_RT_H_
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -72,6 +73,8 @@ typedef struct {
   uint32_t pages, max_pages;
   /** The current size of the linear memory, in bytes. */
   uint32_t size;
+  /** Whether the memory is using mmap for allocation. */
+  uint32_t use_mmap;
 } wasm_rt_memory_t;
 
 /** A Table object. */
@@ -94,6 +97,9 @@ extern void wasm_rt_trap(wasm_rt_trap_t) __attribute__((noreturn));
 /** Initialize a Memory object with an initial page size of `initial_pages` and
  * a maximum page size of `max_pages`.
  *
+ * If `use_mmap` is true, then allocates the memory using `mmap` with appropriate
+ * page protection. Otherwise, allocates using `malloc`.
+ *
  *  ```
  *    wasm_rt_memory_t my_memory;
  *    // 1 initial page (65536 bytes), and a maximum of 2 pages.
@@ -101,7 +107,8 @@ extern void wasm_rt_trap(wasm_rt_trap_t) __attribute__((noreturn));
  *  ``` */
 extern void wasm_rt_allocate_memory(wasm_rt_memory_t*,
                                     uint32_t initial_pages,
-                                    uint32_t max_pages);
+                                    uint32_t max_pages,
+                                    bool use_mmap);
 
 /** Grow a Memory object by `pages`, and return the previous page count. If
  * this new page count is greater than the maximum page count, the grow fails
