@@ -225,7 +225,7 @@ void env_init() {
   // Allocate table and memory
   wasm_rt_allocate_memory(&env_memory_memory,
       env_global_TOTAL_MEMORY / WASM_PAGE_SIZE,
-      env_global_TOTAL_MEMORY / WASM_PAGE_SIZE);
+      env_global_TOTAL_MEMORY / WASM_PAGE_SIZE, true);
   wasm_rt_allocate_table(&env_table_table, 1024, -1);
 
 
