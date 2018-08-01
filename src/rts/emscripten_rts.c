@@ -184,7 +184,6 @@ void env_cfunc_enlargeMemory() {
 
 uint32_t env_cfunc_getTotalMemory() {
   uint32_t ret = (uint32_t) (env_global_TOTAL_MEMORY);
-  fprintf(stderr, "total memory: %d\n", ret);
   return ret;
 }
 
