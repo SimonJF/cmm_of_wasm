@@ -84,7 +84,7 @@ and sexpr_of_expr expr =
       | Const v ->
           let open Libwasm.Types in
           let open Libwasm.Values in
-          Printf.sprintf "%s.%s"
+          Printf.sprintf "%s %s"
             (string_of_value_type (type_of v) ^ ".const")
             (string_of_value v), []
       | Test (op, v) ->
