@@ -15,8 +15,13 @@ module Id = struct
 
   let reset () = count := -1
 
-  let to_string = function
-    | Gen i -> "gen " ^ string_of_int i
+  let to_string ~is_rec = function
+    | Gen i when is_rec -> "rec_cont(" ^ string_of_int i ^ ")"
+    | Gen i -> "cont(" ^ string_of_int i ^ ")"
+    | Return -> "return"
+
+  let branch_string = function
+    | Gen i -> string_of_int i
     | Return -> "return"
 
   module M = struct
@@ -49,12 +54,8 @@ let id lbl = lbl.id
 let arity lbl = lbl.arity
 let local_ids lbl = lbl.local_ids
 
-let to_string x =
-  let local_ids =
-    Printf.sprintf "[%s]"
-      (String.concat ","
-        (List.map (fun x -> string_of_int (Int32.to_int x)) x.local_ids)) in
-  Printf.sprintf "%s(%d):%s" (Id.to_string x.id) x.arity local_ids
+let to_string ~is_rec x = (Id.to_string ~is_rec x.id)
+let branch_string x = (Id.branch_string x.id)
 
-let to_sexpr x =
-  Libwasm.Sexpr.Atom (to_string x)
+let to_sexpr ~is_rec x = Libwasm.Sexpr.Atom (to_string ~is_rec x)
+

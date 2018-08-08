@@ -2,7 +2,7 @@ open Libwasm.Sexpr
 let var = Libwasm.Arrange.var
 let listi = Libwasm.Arrange.listi
 let list = Libwasm.Arrange.list
-let var_atom v = Atom ("var " ^ (Var.to_string v))
+let var_atom v = Atom (Var.to_string v)
 let concat_args xs =
   List.map (Var.to_string) xs |> String.concat " "
 
@@ -25,7 +25,7 @@ let sexpr_of_effect e =
 let rec sexpr_of_term (term: Stackless.term) =
   let body = list sexpr_of_statement term.body in
   let terminator = [sexpr_of_terminator term.terminator] in
-  Node ("term", body @ terminator)
+  body @ terminator
 
 and sexpr_of_statement stmt =
   let head, inner =
@@ -33,14 +33,12 @@ and sexpr_of_statement stmt =
     match stmt with
       | Cont (lbl, binders, is_rec, term) ->
           let txt =
-            Printf.sprintf "%s(%s) %s "
-              (Label.to_string lbl)
-              (concat_args binders)
-              (if is_rec then "rec" else "") in
-          txt,
-            [sexpr_of_term term]
+            Printf.sprintf "%s(%s)"
+              (Label.to_string lbl ~is_rec)
+              (concat_args binders) in
+          (txt, sexpr_of_term term)
       | Let (v, e) ->
-          "let " ^ (Var.to_string v) ^ "=", [sexpr_of_expr e]
+          "let " ^ (Var.to_string v) ^ " =", [sexpr_of_expr e]
       | Effect e -> "effect", [sexpr_of_effect e] in
   Node (head, inner)
 
@@ -77,15 +75,18 @@ and sexpr_of_expr expr =
     match expr with
       | Select { cond; ifso; ifnot } ->
           let str = Var.to_string in
-          "select", [
-            (Atom ("cond: " ^ (str cond)));
-            (Atom ("ifso: " ^ (str ifso)));
-            (Atom ("ifnot: " ^ (str ifnot)))]
+          Printf.sprintf
+            "select(%s, %s, %s)" (str cond) (str ifso) (str ifnot), []
       | GetGlobal glob -> "get_global", [Global.to_sexpr glob]
       | Load (op, v) -> (Libwasm.Arrange.loadop op) ^ ": " ^ (Var.to_string v), []
       | MemorySize -> "memory_size", []
-      | MemoryGrow v -> "memory_grow: " ^ (Var.to_string v), []
-      | Const v -> "const " ^ (Libwasm.Values.string_of_value v), []
+      | MemoryGrow v -> "memory_grow " ^ (Var.to_string v), []
+      | Const v ->
+          let open Libwasm.Types in
+          let open Libwasm.Values in
+          Printf.sprintf "%s.%s"
+            (string_of_value_type (type_of v) ^ ".const")
+            (string_of_value v), []
       | Test (op, v) ->
           let v = Var.to_string v in
           "(" ^ (Libwasm.Arrange.testop op) ^ ") " ^ v, []
@@ -108,11 +109,7 @@ and sexpr_of_expr expr =
   Node (head, inner)
 
 and sexpr_of_func (func: Stackless.func) =
-  Node ("func",
-    [Label.to_sexpr func.return;
-     Atom (": " ^ Libwasm.Types.string_of_func_type func.type_);
-     Atom (concat_args func.params);
-     Node ("body", [sexpr_of_term func.body])])
+  sexpr_of_term func.body
 
 let const c = list sexpr_of_expr c
 
@@ -124,10 +121,9 @@ let sexpr_of_module (m: Stackless.module_) =
   let sexpr_of_func (i, md) =
     let body =
       match Int32Map.find_opt i m.function_ir with
-        | Some ir ->
-            [ Func.to_sexpr md; sexpr_of_func ir ]
-        | None -> [Func.to_sexpr md] in
-    Node ("func", body) in
+        | Some ir -> sexpr_of_func ir
+        | None -> [] in
+    Node (Func.to_string md, body) in
 
   let funcs = Node ("funcs", List.map sexpr_of_func funcs) in
 
