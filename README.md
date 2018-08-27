@@ -1,8 +1,8 @@
 # cmm_of_wasm
 
 A compiler from WebAssembly to native code, via the OCaml backend.
-
-*Very* experimental right now. There are still bugs, the compiler itself can be inefficient, I've not tried compiling any larger applications yet, and I haven't yet done any benchmarking. But still, the compiler is feature-complete in that the WASM test suite passes.
+See [this blog post](http://simonjf.com/2018/08/27/cmm-of-wasm.html)
+for motivation and a technical explanation.
 
 The compiler only supports the `amd64` backend of OCaml at the moment (integer size is assumed to be 64-bit).
 
