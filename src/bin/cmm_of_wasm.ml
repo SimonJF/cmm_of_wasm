@@ -10,14 +10,14 @@ let print_module ast_mod =
 let dump_cmm cmm_phrases =
   if Command_line.dump_cmm () then
     begin
-      print "CMM Phrases: ";
+      print "CMM Phrases:";
       List.iter (Printcmm.phrase Format.std_formatter) cmm_phrases
     end
 
 let dump_stackless ir =
   if Command_line.dump_stackless () then
     begin
-      print "IR Module: ";
+      print "IR Module:";
       print (Ir.Print_stackless.string_of_module ir)
     end
 
